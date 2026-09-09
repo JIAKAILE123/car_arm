@@ -1847,10 +1847,10 @@
         </link>
       </model>
       <model name='red_cube_3'>
-      <pose>-2.02 -3.57 0.015 0 -0 0</pose>
+      <pose>-2.02 -4.50 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>-2.02 -3.57 0.015 0 -0 0</pose>
+          <pose>-2.02 -4.50 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
@@ -2101,7 +2101,7 @@
       </link>
     </model>
     <model name='red_cube_3'>
-      <pose>-2.02 -3.57 0.015 0 -0 0</pose>
+      <pose>-2.02 -4.50 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
           <mass>0.005</mass>

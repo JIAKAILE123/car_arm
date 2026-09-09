@@ -326,25 +326,24 @@ collision_monitor:
     source_timeout: 1.0
     base_shift_correction: True
     stop_pub_timeout: 2.0
-    # Polygons represent zone around the robot for "stop", "slowdown" and "limit" action types,
-    # and robot footprint for "approach" action type.
-    polygons: ["PolygonStop", "FootprintApproach"]
-    # 近距急停：最后一道，不靠把膨胀加到堵死走廊
+    # 两圈：大圈减速（还能跟规划走）→ 小圈才硬停
+    polygons: ["PolygonSlow", "PolygonStop"]
+    PolygonSlow:
+      type: "circle"
+      radius: 0.70
+      action_type: "slowdown"
+      min_points: 4
+      slowdown_ratio: 0.35
+      visualize: True
+      polygon_pub_topic: "polygon_slowdown"
+      enabled: True
     PolygonStop:
       type: "circle"
-      radius: 0.48
+      radius: 0.38
       action_type: "stop"
       min_points: 4
-      visualize: False
-      enabled: True
-    FootprintApproach:
-      type: "polygon"
-      action_type: "approach"
-      footprint_topic: "/local_costmap/published_footprint"
-      time_before_collision: 1.5
-      simulation_time_step: 0.05
-      min_points: 4
-      visualize: False
+      visualize: True
+      polygon_pub_topic: "polygon_stop"
       enabled: True
     observation_sources: ["scan"]
     scan:
