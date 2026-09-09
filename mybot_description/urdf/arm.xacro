@@ -1,0 +1,325 @@
+<?xml version="1.0"?>
+<robot name="six_arm"
+    xmlns:xacro="http://www.ros.org/wiki/xacro">
+    <!-- 定义一些颜色 -->
+    <material name="Blue">
+        <color rgba="0 0 0.8 1" />
+    </material>
+
+    <material name="Black">
+        <color rgba="0 0 0 0.85" />
+    </material>
+
+    <material name="White">
+        <color rgba="1 1 1 1" />
+    </material>
+
+    <!-- 常量 -->
+    <xacro:property name="M_PI" value="3.1415926" />
+
+    <!-- 连杆半径和长度 -->
+    <!-- link1 -->
+    <xacro:property name="link1_rad" value="0.03" />
+    <xacro:property name="link1_len" value="0.1" />
+    <!-- link2 -->
+    <xacro:property name="link2_rad" value="0.03" />
+    <xacro:property name="link2_len" value="0.14" />
+    <!-- link3 -->
+    <xacro:property name="link3_rad" value="0.03" />
+    <xacro:property name="link3_len" value="0.22" />
+    <!-- link4 -->
+    <xacro:property name="link4_rad" value="0.025" />
+    <xacro:property name="link4_len" value="0.06" />
+    <!-- link5 -->
+    <xacro:property name="link5_rad" value="0.03" />
+    <xacro:property name="link5_len" value="0.06" />
+    <!-- link6 -->
+    <xacro:property name="link6_rad" value="0.05" />
+    <xacro:property name="link6_len" value="0.02" />
+    <!-- 夹爪 长宽高-->
+    <!-- gripper -->
+    <xacro:property name="gripper_l" value="0.08" />
+    <xacro:property name="gripper_w" value="0.01" />
+    <xacro:property name="gripper_h" value="0.02" />
+    <!-- 夹爪安装距离参数0~1 -->
+    <xacro:property name="gripper_offset" value="0.75" />
+    <xacro:property name="gripper_offset_h" value="0.002" />
+    <!-- 底座长宽高 -->
+    <!-- base -->
+    <xacro:property name="base_l" value="0.1" />
+    <xacro:property name="base_w" value="0.1" />
+    <xacro:property name="base_h" value="0.04" />
+
+    <!-- 惯性矩阵 -->
+    <xacro:macro name="inertial_matrix" params="m">
+        <inertial>
+            <mass value="${m}" />
+            <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+        </inertial>
+    </xacro:macro>
+
+    <!-- Macro for inertia matrix -->
+    <xacro:macro name="sphere_inertial_matrix" params="m r">
+        <inertial>
+            <mass value="${m}" />
+            <inertia ixx="${2*m*r*r/5}" ixy="0" ixz="0"
+                iyy="${2*m*r*r/5}" iyz="0"
+                izz="${2*m*r*r/5}" />
+        </inertial>
+    </xacro:macro>
+
+    <xacro:macro name="cylinder_inertial_matrix" params="m r h">
+        <inertial>
+            <mass value="${m}" />
+            <inertia ixx="${m*(3*r*r+h*h)/12}" ixy="0" ixz="0"
+                iyy="${m*(3*r*r+h*h)/12}" iyz="0"
+                izz="${m*r*r/2}" />
+        </inertial>
+    </xacro:macro>
+
+    <xacro:macro name="box_inertial_matrix" params="m l w h">
+        <inertial>
+            <mass value="${m}" />
+            <inertia ixx="${m*(h*h + l*l)/12}" ixy="0" ixz="0"
+                iyy="${m*(w*w + l*l)/12}" iyz="0"
+                izz="${m*(w*w + h*h)/12}" />
+        </inertial>
+    </xacro:macro>
+
+    <!-- 底座 -->
+    <link name="arm_base_link">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <box size="${base_l} ${base_w} ${base_h}" />
+            </geometry>
+            <material name="White" />
+        </visual>
+        <collision>
+            <geometry>
+                <box size="${base_l} ${base_w} ${base_h}" />
+            </geometry>
+        </collision>
+        <xacro:inertial_matrix m="1" />
+    </link>
+
+    <!-- joint1 -->
+    <joint name="joint1" type="revolute">
+        <parent link="arm_base_link" />
+        <child link="link1" />
+        <origin xyz="0 0 ${base_h / 2 + link1_len / 2}" rpy="0 0 0" />
+        <axis xyz="0 0 1" />
+        <limit lower="-3.14" upper="3.14" effort="300" velocity="1.0" />
+        <joint_properties damping="50" friction="1" />
+    </joint>
+
+    <!-- link1 -->
+    <link name="link1">
+        <visual>
+            <geometry>
+                <cylinder radius="${link1_rad}" length="${link1_len}" />
+            </geometry>
+            <material name="Blue" />
+        </visual>
+        <collision>
+            <geometry>
+                <cylinder radius="${link1_rad}" length="${link1_len}" />
+            </geometry>
+        </collision>
+        <xacro:inertial_matrix m="0.1" />
+    </link>
+
+
+    <!-- link2 -->
+    <link name="link2">
+        <visual>
+            <origin xyz="0 0 ${link2_len/2}" rpy="0 0 0" />
+            <geometry>
+                <cylinder radius="${link2_rad}" length="${link2_len}" />
+            </geometry>
+            <material name="White" />
+        </visual>
+        <collision>
+            <origin xyz="0 0 ${link2_len/2}" rpy="0 0 0" />
+            <geometry>
+                <cylinder radius="${link2_rad}" length="${link2_len}" />
+            </geometry>
+        </collision>
+        <xacro:inertial_matrix m="0.1" />
+    </link>
+
+    <!-- joint2 -->
+    <joint name="joint2" type="revolute">
+        <parent link="link1" />
+        <child link="link2" />
+        <origin xyz="0 0 ${link1_len/2}" rpy="0 0 0" />
+        <axis xyz="0 1 0" />
+        <limit effort="300" velocity="1.0" lower="-2.35" upper="2.35" />
+        <joint_properties damping="50" friction="1" />
+    </joint>
+
+    <!-- link3 -->
+    <link name="link3">
+        <visual>
+            <origin xyz="0 0 ${link3_len/2}" rpy="0 0 0" />
+            <geometry>
+                <cylinder radius="${link3_rad}" length="${link3_len}" />
+            </geometry>
+            <material name="Blue" />
+        </visual>
+        <collision>
+            <origin xyz="0 0 ${link3_len/2}" rpy="0 0 0" />
+            <geometry>
+                <cylinder radius="${link3_rad}" length="${link3_len}" />
+            </geometry>
+        </collision>
+        <xacro:inertial_matrix m="0.1" />
+    </link>
+
+    <!-- joint3 -->
+    <joint name="joint3" type="revolute">
+        <parent link="link2" />
+        <child link="link3" />
+        <origin xyz="0 0 ${link2_len}" rpy="0 0 0" />
+        <axis xyz="0 1 0" />
+        <limit effort="300" velocity="1.0" lower="-2.62" upper="2.62" />
+
+        <joint_properties damping="50" friction="1" />
+    </joint>
+
+    <!-- link4 -->
+    <link name="link4">
+        <visual>
+            <origin xyz="0 0 ${link4_len/2}" rpy="0 0 0" />
+            <geometry>
+                <cylinder radius="${link4_rad}" length="${link4_len}" />
+            </geometry>
+            <material name="Black" />
+        </visual>
+        <collision>
+            <origin xyz="0 0 ${link4_len/2}" rpy="0 0 0" />
+            <geometry>
+                <cylinder radius="${link4_rad}" length="${link4_len}" />
+            </geometry>
+        </collision>
+        <xacro:inertial_matrix m="0.1" />
+    </link>
+    <!-- joint4 -->
+    <joint name="joint4" type="revolute">
+        <parent link="link3" />
+        <child link="link4" />
+        <origin xyz="0 0 ${link3_len}" rpy="0 0 0" />
+        <axis xyz="0 0 1" />
+        <limit lower="-3.14" upper="3.14" effort="300" velocity="1.0" />
+        <joint_properties damping="50" friction="1" />
+    </joint>
+
+    <!-- link5 -->
+    <link name="link5">
+        <visual>
+            <origin xyz="0 0 ${link5_len/2}" rpy="0 0 0" />
+            <geometry>
+                <cylinder radius="${link5_rad}" length="${link5_len}" />
+            </geometry>
+            <material name="White" />
+        </visual>
+        <collision>
+            <origin xyz="0 0 ${link5_len/2}" rpy="0 0 0" />
+            <geometry>
+                <cylinder radius="${link5_rad}" length="${link5_len}" />
+            </geometry>
+        </collision>
+        <xacro:inertial_matrix m="0.1" />
+    </link>
+
+    <!-- joint5 -->
+    <joint name="joint5" type="revolute">
+        <parent link="link4" />
+        <child link="link5" />
+        <origin xyz="0 0 ${link4_len}" rpy="0 0 0" />
+        <axis xyz="0 -1 0" />
+        <limit effort="300" velocity="1.0" lower="-2.35" upper="2.35" />
+
+        <joint_properties damping="50" friction="1" />
+    </joint>
+
+    <!-- link6 -->
+    <link name="link6">
+        <visual>
+            <origin xyz="0 0 ${link6_len/2}" rpy="0 0 0" />
+            <geometry>
+                <cylinder radius="${link6_rad}" length="${link6_len}" />
+            </geometry>
+            <material name="Blue" />
+        </visual>
+        <collision>
+            <origin xyz="0 0 ${link6_len/2}" rpy="0 0 0" />
+            <geometry>
+                <cylinder radius="${link6_rad}" length="${link6_len}" />
+            </geometry>
+        </collision>
+        <xacro:inertial_matrix m="0.1" />
+    </link>
+
+    <!-- joint6 -->
+    <joint name="joint6" type="revolute">
+        <parent link="link5" />
+        <child link="link6" />
+        <origin xyz="0 0 ${link5_len}" rpy="0 0 0" />
+        <axis xyz="0 0 1" />
+        <limit lower="-3.14" upper="3.14" effort="300" velocity="1.0" />
+        <joint_properties damping="50" friction="1" />
+    </joint>
+
+    <!-- 夹爪 -->
+    <xacro:macro name="gripper_finger_link" params="num">
+        <link name="gripper_finger_link${num}">
+            <visual>
+                <geometry>
+                    <box size="${gripper_l} ${gripper_w} ${gripper_h}" />
+                </geometry>
+                <material name="White" />
+            </visual>
+            <collision>
+                <geometry>
+                    <box size="${gripper_l} ${gripper_w} ${gripper_h}" />
+                </geometry>
+            </collision>
+            <xacro:inertial_matrix m="0.01" />
+        </link>
+    </xacro:macro>
+
+
+    <xacro:gripper_finger_link num="1" />
+    <xacro:gripper_finger_link num="2" />
+
+    <joint name="finger_joint1" type="prismatic">
+        <parent link="link6" />
+        <child link="gripper_finger_link1" />
+        <origin xyz="0 -${link6_rad *gripper_offset} ${gripper_h*2+gripper_offset_h}"
+            rpy="0 ${M_PI/2} 0" />
+        <axis xyz="0 1 0" />
+        <limit effort="100" lower="0" upper="${link6_rad+gripper_w}" velocity="1.0" />
+        <dynamics damping="50" friction="1" />
+    </joint>
+
+    <!-- Was fixed → looked permanently half-closed; both fingers open together. -->
+    <joint name="finger_joint2" type="prismatic">
+        <parent link="link6" />
+        <child link="gripper_finger_link2" />
+        <origin xyz="0 ${link6_rad *gripper_offset} ${gripper_h*2+gripper_offset_h}"
+            rpy="0 ${M_PI/2} 0" />
+        <axis xyz="0 -1 0" />
+        <limit effort="100" lower="0" upper="${link6_rad+gripper_w}" velocity="1.0" />
+        <dynamics damping="50" friction="1" />
+    </joint>
+
+    <!-- Grasping frame -->
+    <link name="grasping_frame" />
+
+    <joint name="grasping_frame_joint" type="fixed">
+        <parent link="link6" />
+        <child link="grasping_frame" />
+        <origin xyz="0 0 0" rpy="0 0 0" />
+    </joint>
+</robot>

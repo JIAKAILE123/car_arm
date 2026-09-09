@@ -1,0 +1,65 @@
+<?xml version="1.0"?>
+<robot name="six_arm"
+    xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <xacro:include filename="$(find mybot_description)/urdf/large_base_gazebo.xacro" />
+    <xacro:include filename="$(find mybot_description)/urdf/rgbd_gazebo.xacro" />
+    <xacro:include filename="$(find mybot_description)/urdf/camera_gazebo.xacro" />
+    <xacro:include filename="$(find mybot_description)/urdf/lidar_gazebo.xacro" />
+    <xacro:include filename="$(find mybot_description)/urdf/arm_gazebo.xacro" />
+
+    <!-- rgbd -->
+    <xacro:property name="rgbd_offset_x" value="0.06" />
+    <xacro:property name="rgbd_offset_y" value="0" />
+    <xacro:property name="rgbd_offset_z" value="-0.03" />
+
+    <joint name="rgbd_joint" type="fixed">
+        <origin xyz="${-rgbd_offset_x} ${rgbd_offset_y} ${rgbd_offset_z}" rpy="0 ${-M_PI/2} 0" />
+        <parent link="grasping_frame" />
+        <child link="camera_rgbd_link" />
+    </joint>
+
+    <xacro:rgbd_camera prefix="camera_rgbd" />
+
+    <!-- Camera -->
+    <xacro:property name="camera_offset_x" value="${base_length/2+0.02}" />
+    <xacro:property name="camera_offset_y" value="0" />
+    <xacro:property name="camera_offset_z" value="-0.01" />
+
+    <joint name="camera_joint" type="fixed">
+        <origin xyz="${camera_offset_x} ${camera_offset_y} ${camera_offset_z}" rpy="0 0 0" />
+        <parent link="base_link" />
+        <child link="camera_link" />
+    </joint>
+
+    <xacro:mipi_camera prefix="camera" />
+
+    <!-- Lidar -->
+    <xacro:property name="lidar_offset_x" value="0" />
+    <xacro:property name="lidar_offset_y" value="0" />
+    <xacro:property name="lidar_offset_z" value="${base_height/2+0.01}" />
+    <xacro:property name="robot_radius" value="${(base_length**2 + base_width**2)**0.5 / 2}" />
+    <xacro:property name="safety_margin" value="0.05" />
+
+    <joint name="lidar_joint" type="fixed">
+        <origin xyz="${lidar_offset_x} ${lidar_offset_y} ${lidar_offset_z}" rpy="0 0 0" />
+        <parent link="base_link" />
+        <child link="laser_link" />
+    </joint>
+
+    <xacro:lidar prefix="laser" gz_visualize="false" range_min="0.5" />
+    <!-- <xacro:lidar prefix="laser" gz_visualize="false" range_min="${robot_radius +
+    safety_margin}" /> -->
+
+    <!-- arm -->
+    <xacro:property name="arm_offset_x" value="0.0" />
+    <xacro:property name="arm_offset_y" value="0" />
+    <xacro:property name="arm_offset_z" value="${base_height/2+0.01}" />
+
+    <joint name="connect_joint" type="fixed">
+        <origin xyz="${arm_offset_x} ${arm_offset_y} ${arm_offset_z}" rpy=" 0 0 0" />
+        <parent link="base_link" />
+        <child link="arm_base_link" />
+    </joint>
+
+</robot>

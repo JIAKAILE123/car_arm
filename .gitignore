@@ -1,0 +1,21 @@
+# ROS / colcon
+build/
+install/
+log/
+*.pyc
+__pycache__/
+.pytest_cache/
+*.egg-info/
+.colcon_install_layout
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+.cursor/
+
+# Local / large
+*.bag
+*.pgm.bak
+**/COLCON_IGNORE
