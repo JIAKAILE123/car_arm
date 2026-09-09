@@ -83,7 +83,9 @@ class TaskStateMachine(Node):
         self.declare_parameter("prefer_joint_pick", True)
         self.declare_parameter("allow_known_map", True)
         self.declare_parameter("use_cube_standoff", True)
-        self.declare_parameter("grasp_standoff_m", 0.55)
+
+        self.declare_parameter("grasp_standoff_m", 0.40)
+
         self.declare_parameter("grasp_standoff_retry_m", 0.28)
         self.declare_parameter("lock_min_area", 60.0)
         self.declare_parameter("lock_max_err_u", 0.10)
@@ -170,12 +172,29 @@ class TaskStateMachine(Node):
     def _expand(self, tasks: List[PickTask]) -> List[Tuple[str, int, str]]:
         queue: List[Tuple[str, int, str]] = []
         max_c = int(self.get_parameter("max_cubes").value)
+        used = {"red": set(), "blue": set()}
         for t in tasks:
+            if t.cube_id is not None:
+                cid = int(t.cube_id)
+                if cid < 1 or cid > max_c:
+                    self.get_logger().error(f"bad cube id {t.color}_{cid}")
+                    continue
+                if cid in used[t.color]:
+                    self.get_logger().warn(f"duplicate {t.color}_{cid}, skip")
+                    continue
+                used[t.color].add(cid)
+                queue.append((t.color, cid, t.zone))
+                # keep cube_next past this id so count-mode stays consistent
+                self.cube_next[t.color] = max(self.cube_next[t.color], cid + 1)
+                continue
             for _ in range(t.count):
                 cid = self.cube_next[t.color]
+                while cid <= max_c and cid in used[t.color]:
+                    cid += 1
                 if cid > max_c:
                     self.get_logger().error(f"no more {t.color} cubes")
                     break
+                used[t.color].add(cid)
                 queue.append((t.color, cid, t.zone))
                 self.cube_next[t.color] = cid + 1
         return queue
@@ -205,10 +224,11 @@ class TaskStateMachine(Node):
             if standoff_m is None
             else float(standoff_m)
         )
+        mx, my, mz = known_cube_xy(color, cid)
         self._pub_status(
             f"PARK_FIXED {color}_cube_{cid} 前方 "
             f"({ax:.2f},{ay:.2f},yaw={ayaw:.2f}) | "
-            f"物块固定坐标 map≈({ax-so:.2f},{ay:.2f},0.75) standoff={so:.2f}m"
+            f"物块固定坐标 map≈({mx:.2f},{my:.2f},{mz:.3f}) standoff={so:.2f}m"
         )
         self.motion.exit_local_mode()
         xy_tol = float(self.get_parameter("pose_gate_xy").value)
@@ -496,31 +516,45 @@ class TaskStateMachine(Node):
         return self._pick_center_range_preset(color, cid)
 
     def _pick_known_coords(self, color: str, cid: int) -> bool:
-        """Park done → 预设下探臂 → 吸附（不再视觉搜）。"""
+        """Park done → 开爪 → 预设下探到位 → 再吸附 → 抬起。
+
+        严禁在臂未到位时 ATTACH：LinkAttacher 用单位姿对齐，会先把块扯到
+        link6（看起来像「夹一下块就飞起来，然后臂才下来」）。
+        """
         import subprocess
         import os
 
         self.motion.stop_chassis()
+
+        # 清掉上次残留吸附，否则一动臂块就会跟着飞
+        self._pub_status(f"DETACH_CLEAR {color}_{cid} (before arm)")
+        try:
+            self.motion.detach(color, cid)
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warn(f"pre-detach ignored: {exc}")
+        time.sleep(0.2)
+
         mx, my, mz = known_cube_xy(color, cid)
         if self.motion.snap_cube_fixed(color, cid):
             self._pub_status(
                 f"CUBE_FIXED {color}_cube_{cid} @ map=({mx:.2f},{my:.2f},{mz:.2f})"
             )
 
-        # 预设下探（send_goal_pick / PICK 关节），不是视觉乱找
-        self._pub_status("PRESET_ARM 下探 (PREGRASP→PICK)")
-        if not self.motion.ensure_gripper_open():
-            self._pub_status("PICK_ABORT MTC_OPEN_FAIL")
-            return False
+        # 假吸附不需要夹爪动作：禁止开合，避免「举着先夹一下」
+        self._pub_status("GRIPPER_SKIP (LinkAttacher，不发夹爪轨迹)")
+
+        # 预设下探到位 —— 必须在吸附之前完成
+        self._pub_status("PRESET_ARM 下探 (mid→PICK) — 到位后再吸")
         if not self.motion.arm_pick_pose(0.0):
             self._pub_status("PICK_ABORT PRESET_ARM_FAIL")
             return False
-        time.sleep(0.3)
+        time.sleep(0.5)
 
+        # 臂到位后再吸附（cube_control / ATTACHLINK）
         script = os.path.join(
             os.path.expanduser("~/dev_ws/src/yzbot"), "cube_control.sh"
         )
-        self._pub_status(f"ATTACH → cube_control on {color} {cid}")
+        self._pub_status(f"ATTACH → cube_control on {color} {cid} (arm already at PICK)")
         ok = False
         if os.path.isfile(script):
             try:
@@ -539,13 +573,16 @@ class TaskStateMachine(Node):
             self._pub_status(f"ATTACH_FAIL {color}_{cid}")
             return False
         self._pub_status(f"MTC_ATTACH_OK {color}_{cid}")
+        time.sleep(0.2)
 
-        # 抬起带走
+        # 抬起带走，再等底盘/定位稳定后再去放置区
         self._pub_status("MTC_LIFT")
         if not self.motion.arm_carry_pose(0.0):
             self.get_logger().warn("carry pose failed; cube may still be attached")
         else:
             self._pub_status("MTC_LIFT_OK")
+        self.motion.stop_chassis()
+        time.sleep(1.5)
         return True
 
     def _place_with_moveit(self, color: str, cid: int) -> bool:
@@ -653,7 +690,13 @@ class TaskStateMachine(Node):
                 self.motion.exit_local_mode()
                 self._pub_status(f"NAV_START → place zone {zone}")
                 if not self.motion.navigate_and_verify(
-                    zx, zy, zyaw, retries=1, xy_tol=0.35, yaw_tol=0.40
+                    zx,
+                    zy,
+                    zyaw,
+                    retries=3,
+                    xy_tol=0.45,
+                    yaw_tol=0.50,
+                    settle_sec=2.0,
                 ):
                     self._pub_status(f"NAV_PLACE_FAIL {zone}")
                     return

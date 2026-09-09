@@ -14,6 +14,14 @@ def test_parse_plain():
     assert tasks[0].zone == "B"
 
 
+def test_parse_cube_id():
+    tasks = parse_command("[red#1,A;blue#2,B;red#3,C;blue#5,A;red#5,B]")
+    assert len(tasks) == 5
+    assert tasks[0].cube_id == 1 and tasks[0].color == "red" and tasks[0].zone == "A"
+    assert tasks[1].cube_id == 2 and tasks[1].color == "blue"
+    assert tasks[4].cube_id == 5 and tasks[4].color == "red" and tasks[4].zone == "B"
+
+
 def test_solver_official_sample():
     q = (
         "题目: 每个衣柜有5件衣物;有T恤、裤子两种衣柜;"

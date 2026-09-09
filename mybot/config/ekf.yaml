@@ -4,6 +4,7 @@ ekf_filter_node:
     frequency: 30.0
     sensor_timeout: 0.5
     two_d_mode: true
+    # Gazebo publishes /odom only; EKF alone publishes odom→base_footprint TF.
     publish_tf: true
     map_frame: map
     odom_frame: odom

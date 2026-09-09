@@ -1,28 +1,29 @@
 # Fallback when use_cube_standoff:=false.
-# Default: per-cube PARK at cube_x+0.55 (see approach_xy_for_cube).
+# Default: per-cube PARK at cube_x+grasp_standoff_m (see approach_xy_for_cube).
+# Cube XY live in vision_pose._KNOWN_CUBES (must match offic_room.world).
 
 red_approach:
-  x: -0.95
-  y: 1.0
+  x: -6.49
+  y: -2.80
   yaw: 3.1416
 
 blue_approach:
-  x: -0.95
-  y: -1.0
+  x: -5.78
+  y: 5.50
   yaw: 3.1416
 
 zone_a:
-  x: 4.2
+  x: 4.5
   y: -11.0
   yaw: 0.0
 
 zone_b:
-  x: 4.2
+  x: 4.5
   y: -12.0
   yaw: 0.0
 
 zone_c:
-  x: 4.2
+  x: 4.5
   y: -13.0
   yaw: 0.0
 

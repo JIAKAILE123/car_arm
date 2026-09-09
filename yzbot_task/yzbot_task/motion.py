@@ -252,12 +252,19 @@ class MotionHelpers:
             self.node.get_logger().error("nav goal rejected")
             return False
         self._nav_goal_handle = goal_handle
-        result = goal_handle.get_result_async()
-        if not self._spin_until(result, timeout):
+        result_fut = goal_handle.get_result_async()
+        if not self._spin_until(result_fut, timeout):
             self.node.get_logger().error("nav result timeout")
             self.cancel_nav()
             return False
         self._nav_goal_handle = None
+        from action_msgs.msg import GoalStatus
+
+        wrapped = result_fut.result()
+        status = int(getattr(wrapped, "status", GoalStatus.STATUS_UNKNOWN))
+        if status != GoalStatus.STATUS_SUCCEEDED:
+            self.node.get_logger().error(f"nav finished status={status} (not SUCCEEDED)")
+            return False
         return True
 
     def get_base_xy_yaw_map(self) -> Optional[Tuple[float, float, float]]:
@@ -319,6 +326,7 @@ class MotionHelpers:
         xy_tol: float = 0.20,
         yaw_tol: float = 0.20,
         timeout: float = 180.0,
+        settle_sec: float = 1.5,
     ) -> bool:
         """Nav2 approach + TF pose gate (standard mobile-manipulator pattern)."""
         attempts = max(int(retries), 0) + 1
@@ -326,8 +334,8 @@ class MotionHelpers:
             if not self.navigate(x, y, yaw, timeout=timeout):
                 self.node.get_logger().error(f"NAV attempt {i + 1}/{attempts} failed")
                 continue
-            # wait for base to settle before TF gate
-            time.sleep(1.0)
+            time.sleep(max(float(settle_sec), 0.5))
+            self.stop_chassis()
             ok, why = self.pose_gate_ok(x, y, yaw, xy_tol=xy_tol, yaw_tol=yaw_tol)
             self.node.get_logger().info(why)
             if ok:
@@ -740,35 +748,32 @@ class MotionHelpers:
         )
 
     def arm_pick_pose(self, j1: float = 0.0) -> bool:
-        """Final reach-down; keep joint1 from wrist align."""
+        """Reach-down to PICK. No high PREGRASP hop (looked like raise→clamp→down)."""
         j1 = float(j1)
-        pre = list(PREGRASP)
-        pre[0] = j1
         pick = list(PICK)
         pick[0] = j1
         mid = [j1, 1.05, 1.12, 0.0, -0.3, 0.0]
-        self.node.get_logger().info(f"ARM pick pose j1={j1:.3f}")
+        self.node.get_logger().info(f"ARM pick pose j1={j1:.3f} (direct mid→pick)")
         return self._send_traj(
             self.arm,
             ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
             [
-                (pre, 0, 500),
-                (mid, 2, 0),
-                (pick, 4, 0),
+                (mid, 0, 500),
+                (pick, 3, 0),
             ],
         )
 
     def arm_carry_pose(self, j1: float = 0.0) -> bool:
-        """Hold cube high while driving. Fold j1→0 for chassis clearance."""
+        """Fold arm compact over base while driving (less forward stick → less wall hit)."""
         j1 = float(j1)
-        self.node.get_logger().info("ARM carry pose (high)")
+        self.node.get_logger().info("ARM carry pose (tucked)")
         return self._send_traj(
             self.arm,
             ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
             [
                 ([j1, 1.2, 1.17, 0.0, -0.3, 0.0], 0, 500),
-                ([0.0, 0.45, 0.9, 0.0, -0.5, 0.0], 3, 0),
-                ([0.0, 0.25, 0.7, 0.0, -0.6, 0.0], 5, 0),
+                ([0.0, 0.35, 1.15, 0.0, -0.9, 0.0], 2.5, 0),
+                ([0.0, 0.15, 1.25, 0.0, -1.1, 0.0], 4.5, 0),
             ],
         )
 
@@ -796,12 +801,13 @@ class MotionHelpers:
         )
 
     def gripper_open(self) -> bool:
-        """Open both fingers (URDF upper≈0.06)."""
+        """Open both fingers (URDF upper≈0.06). Never slam closed first."""
         self.node.get_logger().info("GRIPPER open cmd (both fingers)")
+        # Stay at open — starting at [0,0] looked like a false clamp before attach.
         return self._send_traj(
             self.grip,
             ["finger_joint1", "finger_joint2"],
-            [([0.0, 0.0], 0, 200000000), ([0.05, 0.05], 1, 500000000)],
+            [([0.05, 0.05], 0, 200000000), ([0.05, 0.05], 1, 0)],
             timeout=15.0,
         )
 
@@ -809,6 +815,14 @@ class MotionHelpers:
         self, *, min_pos: float = 0.035, timeout: float = 6.0
     ) -> bool:
         """Open + verify both fingers via /joint_states (MTC open stage)."""
+        f1 = self._finger_pos
+        f2 = self._finger2_pos
+        if f1 is not None and f1 >= min_pos and (f2 is None or f2 >= min_pos):
+            f2s = f"{f2:.3f}" if f2 is not None else "n/a"
+            self.node.get_logger().info(
+                f"GRIPPER already open finger1={f1:.3f} finger2={f2s} — skip traj"
+            )
+            return True
         self.gripper_open()
         t0 = time.time()
         while time.time() - t0 < timeout:

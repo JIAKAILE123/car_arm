@@ -435,12 +435,28 @@ def ee_to_pose_distance_m(tf_buffer: Buffer, pose_arm: PoseStamped) -> Optional[
     return float(np.sqrt(dx * dx + dy * dy + dz * dz))
 
 
+# Scattered XY (seed=20260909); Z kept on floor (official state ~0.015), not mid-air.
+# Park uses approach_xy_for_cube → (x+standoff, y, yaw=π).
+_KNOWN_CUBES = {
+    ("red", 1): (-6.89, -2.80, 0.015),
+    ("red", 2): (-2.89, -5.85, 0.015),
+    ("red", 3): (-2.02, -3.57, 0.015),
+    ("red", 4): (-2.77, 5.80, 0.015),
+    ("red", 5): (-2.08, 3.66, 0.015),
+    ("blue", 1): (-6.18, 5.50, 0.015),
+    ("blue", 2): (-8.21, -5.21, 0.015),
+    ("blue", 3): (-7.08, 2.35, 0.015),
+    ("blue", 4): (-5.77, -5.28, 0.015),
+    ("blue", 5): (-4.51, 4.14, 0.015),
+}
+
+
 def known_cube_xy(color: str, cube_id: int):
-    """Official offic_room / v2 layout (mapn3 unchanged)."""
-    x = -1.4 - 0.1 * float(cube_id)
-    y = 1.0 if color.lower() == "red" else -1.0
-    z = 0.75
-    return x, y, z
+    """Map pose of numbered cube (must match Gazebo world)."""
+    key = (color.lower(), int(cube_id))
+    if key not in _KNOWN_CUBES:
+        raise KeyError(f"unknown cube {color}_{cube_id}")
+    return _KNOWN_CUBES[key]
 
 
 def cube_bearing_in_base(

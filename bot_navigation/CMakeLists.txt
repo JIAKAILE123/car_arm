@@ -19,7 +19,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(nav2_bringup REQUIRED)
 install(
-  DIRECTORY launch param maps config rviz
+  DIRECTORY launch param maps config rviz behavior_trees
   DESTINATION share/${PROJECT_NAME}
 )
 # scripts/auto_initial_pose.py is missing in this repo; skip install so the package builds.
