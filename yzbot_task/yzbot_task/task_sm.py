@@ -68,7 +68,9 @@ class TaskStateMachine(Node):
         # OFF by default: continuous yaw IBVS made the car spin away
         self.declare_parameter("use_chassis_align", True)
         self.declare_parameter("align_timeout", 14.0)
-        self.declare_parameter("align_yaw_gain", 0.95)
+        self.declare_parameter("align_yaw_gain", 0.70)
+        # Slow in-place yaw while searching — fast spin kills AMCL
+        self.declare_parameter("align_max_wz", 0.14)
         self.declare_parameter("local_settle_sec", 0.5)
         # Nav2 常停在 0.25~0.35m / ~0.5rad 误差内，过严会反复失败
         self.declare_parameter("pose_gate_xy", 0.40)
@@ -85,7 +87,7 @@ class TaskStateMachine(Node):
         self.declare_parameter("allow_known_map", True)
         self.declare_parameter("use_cube_standoff", True)
 
-        self.declare_parameter("grasp_standoff_m", 0.40)
+        self.declare_parameter("grasp_standoff_m", 0.26)
 
         self.declare_parameter("grasp_standoff_retry_m", 0.28)
         self.declare_parameter("lock_min_area", 60.0)
@@ -96,9 +98,17 @@ class TaskStateMachine(Node):
         self.declare_parameter("visual_r_tol", 0.04)
         self.declare_parameter("range_timeout", 12.0)
         self.declare_parameter("timeout_see", 4.0)
-        self.declare_parameter("sweep_yaw_rad", 0.55)
-        self.declare_parameter("stable_hold_sec", 0.25)
+        self.declare_parameter("sweep_yaw_rad", 0.25)
+        self.declare_parameter("stable_hold_sec", 0.40)
         self.declare_parameter("preset_r_slack", 0.15)
+        # Fixed pick visual gate: whole cube inside large square + pixel range
+        self.declare_parameter("lock_v_frac", 0.75)
+        self.declare_parameter("grasp_box_frac", 0.15)
+        self.declare_parameter("target_area_frac", 0.028)
+        self.declare_parameter("area_frac_tol", 0.012)
+        self.declare_parameter("target_fill", 0.90)
+        self.declare_parameter("fill_tol", 0.14)
+        self.declare_parameter("cube_width_m", 0.03)
 
         self.poses = _load_poses()
         self.cb_group = ReentrantCallbackGroup()
@@ -259,14 +269,41 @@ class TaskStateMachine(Node):
             self._pub_status(f"NAV_PICK_FAIL / POSE_GATE_FAIL {color}_{cid}")
             return False
         self.motion.stop_chassis()
+        # Extra pin: Nav arrived at known park (helps if gate was loose)
+        self.motion.reanchor_amcl(ax, ay, ayaw, settle_sec=0.5)
         self._pub_status("NAV_OK + POSE_GATE_OK (chassis STOP, axis-aligned)")
         return True
 
-    def _publish_dbg(self, bgr, blob, label: str, prefer_uv=None):
+    def _publish_dbg(
+        self,
+        bgr,
+        blob,
+        label: str,
+        prefer_uv=None,
+        lock_v_frac: Optional[float] = None,
+        grasp_box_frac: Optional[float] = None,
+    ):
         try:
             if bgr is None:
                 return
-            vis = annotate_bgr(bgr, blob, label=label, prefer_uv=prefer_uv)
+            lv = (
+                float(self.get_parameter("lock_v_frac").value)
+                if lock_v_frac is None
+                else float(lock_v_frac)
+            )
+            gb = (
+                float(self.get_parameter("grasp_box_frac").value)
+                if grasp_box_frac is None
+                else float(grasp_box_frac)
+            )
+            vis = annotate_bgr(
+                bgr,
+                blob,
+                label=label,
+                prefer_uv=prefer_uv,
+                lock_v_frac=lv,
+                grasp_box_frac=gb,
+            )
             msg = self._cv_bridge.cv2_to_imgmsg(vis, encoding="bgr8")
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = "camera_link"
@@ -440,6 +477,7 @@ class TaskStateMachine(Node):
             color,
             err_ok=float(self.get_parameter("lock_max_err_u").value),
             yaw_gain=float(self.get_parameter("align_yaw_gain").value),
+            max_wz=float(self.get_parameter("align_max_wz").value),
             target_r=float(self.get_parameter("visual_target_r").value),
             r_tol=float(self.get_parameter("visual_r_tol").value),
             timeout_see=float(self.get_parameter("timeout_see").value),
@@ -691,13 +729,27 @@ class TaskStateMachine(Node):
                 settle = float(self.get_parameter("local_settle_sec").value)
                 so = float(self.get_parameter("grasp_standoff_m").value)
                 self._pub_status(
-                    "OPENCV_ALIGN: 导航后微调（转动+前后，车体对准块）"
+                    "OPENCV_ALIGN: 坐标粗朝向 → 先对中线 → 再贴合方块下探"
                 )
                 self.motion.enter_local_mode(settle_sec=settle)
                 self.motion.stop_chassis()
                 try:
-                    def _on_oc(bgr, blob, phase: str, prefer_uv=None):
-                        self._publish_dbg(bgr, blob, phase, prefer_uv=prefer_uv)
+                    def _on_oc(
+                        bgr,
+                        blob,
+                        phase: str,
+                        prefer_uv=None,
+                        lock_v_frac=None,
+                        grasp_box_frac=None,
+                    ):
+                        self._publish_dbg(
+                            bgr,
+                            blob,
+                            phase,
+                            prefer_uv=prefer_uv,
+                            lock_v_frac=lock_v_frac,
+                            grasp_box_frac=grasp_box_frac,
+                        )
 
                     aligned = self.motion.opencv_align_to_cube(
                         color,
@@ -705,26 +757,53 @@ class TaskStateMachine(Node):
                         target_r=so,
                         r_tol=float(self.get_parameter("visual_r_tol").value),
                         err_ok=min(
-                            0.05, float(self.get_parameter("lock_max_err_u").value)
+                            0.15, float(self.get_parameter("lock_max_err_u").value) + 0.05
                         ),
                         yaw_gain=float(self.get_parameter("align_yaw_gain").value),
+                        max_wz=float(self.get_parameter("align_max_wz").value),
                         timeout=max(
                             16.0, float(self.get_parameter("lock_timeout").value)
+                        ),
+                        stable_hold_sec=float(
+                            self.get_parameter("stable_hold_sec").value
+                        ),
+                        lock_v_frac=float(self.get_parameter("lock_v_frac").value),
+                        grasp_box_frac=float(
+                            self.get_parameter("grasp_box_frac").value
+                        ),
+                        target_area_frac=float(
+                            self.get_parameter("target_area_frac").value
+                        ),
+                        area_frac_tol=float(
+                            self.get_parameter("area_frac_tol").value
+                        ),
+                        target_fill=float(self.get_parameter("target_fill").value),
+                        fill_tol=float(self.get_parameter("fill_tol").value),
+                        cube_width_m=float(
+                            self.get_parameter("cube_width_m").value
                         ),
                         on_frame=_on_oc,
                     )
                     if aligned:
                         self._pub_status("OPENCV_ALIGN_OK → 预设下探")
                     else:
+                        # Soft: 差一点也下探吸附，禁止因超时直接放弃任务
                         self._pub_status(
-                            "OPENCV_ALIGN_FAIL (未对准，不下探)"
+                            "OPENCV_ALIGN_SOFT (差一点/超时仍预设下探吸附)"
                         )
-                        self.motion.stop_chassis()
-                        self.motion.exit_local_mode()
-                        return
                 finally:
                     self.motion.stop_chassis()
                     self.motion.exit_local_mode()
+
+                # Align spins AMCL — re-pin to park before place-nav
+                ax, ay, ayaw = self._parking_xy(color, cid, standoff_m=so)
+                cur = self.motion.get_base_xy_yaw_map()
+                if cur is not None:
+                    # Keep post-align yaw (faces cube); pin XY near park
+                    self.motion.reanchor_amcl(ax, ay, float(cur[2]), settle_sec=0.7)
+                else:
+                    self.motion.reanchor_amcl(ax, ay, ayaw, settle_sec=0.7)
+                self.motion.clear_costmaps()
 
                 self.motion.stop_chassis()
                 self._pub_status("PICK: 预设下探 → 吸附")
@@ -747,6 +826,7 @@ class TaskStateMachine(Node):
 
             if not skip_nav:
                 self._pub_status(f"NAV_START → place zone {zone}")
+                self.motion.prepare_next_nav()
                 if not self.motion.navigate_and_verify(
                     zx,
                     zy,
@@ -762,6 +842,8 @@ class TaskStateMachine(Node):
             if not self._place_with_moveit(color, cid):
                 return
             self._pub_status(f"PLACED {color}_{cid} at {zone}")
+            # Place done — pin zone pose so next pick-nav does not start skewed
+            self.motion.prepare_next_nav(zx, zy, zyaw)
 
         self._pub_status("DONE")
 

@@ -1577,10 +1577,10 @@
         </link>
       </model>
       <model name='blue_cube_1'>
-      <pose>-6.18 4.20 0.015 0 -0 0</pose>
+      <pose>-6.18 -2.20 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>-6.18 4.20 0.015 0 -0 0</pose>
+          <pose>-6.18 -2.20 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
@@ -1597,10 +1597,10 @@
         </link>
       </model>
       <model name='blue_cube_3'>
-      <pose>-7.08 2.35 0.015 0 -0 0</pose>
+      <pose>-8.08 2.35 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>-7.08 2.35 0.015 0 -0 0</pose>
+          <pose>-8.08 2.35 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
@@ -1617,10 +1617,10 @@
         </link>
       </model>
       <model name='blue_cube_5'>
-      <pose>-4.51 4.14 0.015 0 -0 0</pose>
+      <pose>-4.20 -11.14 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>-4.51 4.14 0.015 0 -0 0</pose>
+          <pose>-4.20 -11.14 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
@@ -1877,102 +1877,102 @@
         </link>
       </model>
       <model name='zone_a'>
-        <pose>5 -11 0.01 0 -0 0</pose>
+        <pose>5.4 -11.8 0.01 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='base'>
-          <pose>5 -11 0.01 0 -0 0</pose>
+          <pose>5.4 -11.8 0.01 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_A_1'>
-          <pose>4.9 -11 0.23 0 0.4 0</pose>
+          <pose>5.3 -11.8 0.23 0 0.4 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_A_2'>
-          <pose>5.1 -11 0.23 0 -0.4 0</pose>
+          <pose>5.5 -11.8 0.23 0 -0.4 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_A_3'>
-          <pose>5 -11 0.26 0 -0 0</pose>
+          <pose>5.4 -11.8 0.26 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
       </model>
       <model name='zone_b'>
-        <pose>5 -12 0.01 0 -0 0</pose>
+        <pose>0.5 -4.2 0.01 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='base'>
-          <pose>5 -12 0.01 0 -0 0</pose>
+          <pose>0.5 -4.2 0.01 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_B_bottom_horizontal'>
-          <pose>5.05 -12 0.03 0 -0 0</pose>
+          <pose>0.55 -4.2 0.03 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_B_bottom_vertical_stroke'>
-          <pose>5.15 -12 0.12 0 -0 0</pose>
+          <pose>0.65 -4.2 0.12 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_B_middle_horizontal'>
-          <pose>5.05 -12 0.21 0 -0 0</pose>
+          <pose>0.55 -4.2 0.21 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_B_top_horizontal'>
-          <pose>5.05 -12 0.39 0 -0 0</pose>
+          <pose>0.55 -4.2 0.39 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_B_top_vertical_stroke'>
-          <pose>5.15 -12 0.3 0 -0 0</pose>
+          <pose>0.65 -4.2 0.3 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_B_vertical_stroke'>
-          <pose>4.9 -12 0.21 0 -0 0</pose>
+          <pose>0.4 -4.2 0.21 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
       </model>
       <model name='zone_c'>
-        <pose>5 -13 0.01 0 -0 0</pose>
+        <pose>-8.3 -6.5 0.01 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='base'>
-          <pose>5 -13 0.01 0 -0 0</pose>
+          <pose>-8.3 -6.5 0.01 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_C_1'>
-          <pose>4.95 -13 0.39 0 -0 0</pose>
+          <pose>-8.35 -6.5 0.39 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_C_2'>
-          <pose>4.95 -13 0.03 0 -0 0</pose>
+          <pose>-8.35 -6.5 0.03 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_C_3'>
-          <pose>4.82 -13 0.21 0 -0 0</pose>
+          <pose>-8.48 -6.5 0.21 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
@@ -1986,7 +1986,7 @@
       <pose>-6.89 -2.8 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>1.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2009,15 +2009,15 @@
               <ode>
                 <soft_cfm>0.001</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
+                <max_vel>0.01</max_vel>
                 <min_depth>0.001</min_depth>
               </ode>
             </contact>
             <bounce/>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2045,7 +2045,7 @@
       <pose>-2.89 -5.85 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>1.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2068,15 +2068,15 @@
               <ode>
                 <soft_cfm>0.001</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
+                <max_vel>0.01</max_vel>
                 <min_depth>0.001</min_depth>
               </ode>
             </contact>
             <bounce/>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2104,7 +2104,7 @@
       <pose>-2.02 -4.50 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>1.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2127,15 +2127,15 @@
               <ode>
                 <soft_cfm>0.001</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
+                <max_vel>0.01</max_vel>
                 <min_depth>0.001</min_depth>
               </ode>
             </contact>
             <bounce/>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2163,7 +2163,7 @@
       <pose>-2.77 5.8 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>1.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2186,15 +2186,15 @@
               <ode>
                 <soft_cfm>0.001</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
+                <max_vel>0.01</max_vel>
                 <min_depth>0.001</min_depth>
               </ode>
             </contact>
             <bounce/>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2222,7 +2222,7 @@
       <pose>-2.08 3.66 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>1.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2245,15 +2245,15 @@
               <ode>
                 <soft_cfm>0.001</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
+                <max_vel>0.01</max_vel>
                 <min_depth>0.001</min_depth>
               </ode>
             </contact>
             <bounce/>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2278,10 +2278,10 @@
       </link>
     </model>
     <model name='blue_cube_1'>
-      <pose>-6.18 4.20 0.015 0 -0 0</pose>
+      <pose>-6.18 -2.20 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>1.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2304,15 +2304,15 @@
               <ode>
                 <soft_cfm>0.001</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
+                <max_vel>0.01</max_vel>
                 <min_depth>0.001</min_depth>
               </ode>
             </contact>
             <bounce/>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2340,7 +2340,7 @@
       <pose>-8.21 -5.21 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>1.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2363,15 +2363,15 @@
               <ode>
                 <soft_cfm>0.001</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
+                <max_vel>0.01</max_vel>
                 <min_depth>0.001</min_depth>
               </ode>
             </contact>
             <bounce/>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2396,10 +2396,10 @@
       </link>
     </model>
     <model name='blue_cube_3'>
-      <pose>-7.08 2.35 0.015 0 -0 0</pose>
+      <pose>-8.08 2.35 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>1.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2422,15 +2422,15 @@
               <ode>
                 <soft_cfm>0.001</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
+                <max_vel>0.01</max_vel>
                 <min_depth>0.001</min_depth>
               </ode>
             </contact>
             <bounce/>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2458,7 +2458,7 @@
       <pose>-5.77 -5.28 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>1.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2481,15 +2481,15 @@
               <ode>
                 <soft_cfm>0.001</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
+                <max_vel>0.01</max_vel>
                 <min_depth>0.001</min_depth>
               </ode>
             </contact>
             <bounce/>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2514,10 +2514,10 @@
       </link>
     </model>
     <model name='blue_cube_5'>
-      <pose>-4.51 4.14 0.015 0 -0 0</pose>
+      <pose>-4.20 -11.14 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>1.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2540,15 +2540,15 @@
               <ode>
                 <soft_cfm>0.001</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
+                <max_vel>0.01</max_vel>
                 <min_depth>0.001</min_depth>
               </ode>
             </contact>
             <bounce/>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2574,7 +2574,7 @@
     </model>
     <model name='zone_a'>
       <static>1</static>
-      <pose>3 1 0.01 0 -0 0</pose>
+      <pose>5.4 -11.8 0.01 0 -0 0</pose>
       <link name='base'>
         <visual name='visual'>
           <geometry>
@@ -2645,7 +2645,7 @@
     </model>
     <model name='zone_b'>
       <static>1</static>
-      <pose>3 0 0.01 0 -0 0</pose>
+      <pose>0.5 -4.2 0.01 0 -0 0</pose>
       <link name='base'>
         <visual name='visual'>
           <geometry>
@@ -2767,7 +2767,7 @@
     </model>
     <model name='zone_c'>
       <static>1</static>
-      <pose>3 -1 0.01 0 -0 0</pose>
+      <pose>-8.3 -6.5 0.01 0 -0 0</pose>
       <link name='base'>
         <visual name='visual'>
           <geometry>

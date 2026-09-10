@@ -28,9 +28,10 @@
             <ClearEntireCostmap name="ClearGlobalRecovery" service_name="global_costmap/clear_entirely_global_costmap"/>
           </Sequence>
           <BackUp backup_dist="0.35" backup_speed="0.12"/>
-          <Wait wait_duration="0.5"/>
-          <Spin spin_dist="0.6"/>
+          <Wait wait_duration="0.8"/>
+          <!-- No Spin: in-place spin after place/pick kills AMCL → Nav freezes -->
           <BackUp backup_dist="0.20" backup_speed="0.10"/>
+          <Wait wait_duration="0.5"/>
         </RoundRobin>
       </ReactiveFallback>
     </RecoveryNode>

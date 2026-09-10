@@ -12,19 +12,21 @@ blue_approach:
   y: 5.50
   yaw: 3.1416
 
+# Place zones: three rooms separated by walls (large open centers)
+# A south hall | B mid open | C west room
 zone_a:
-  x: 4.5
-  y: -11.0
+  x: 5.4
+  y: -11.8
   yaw: 0.0
 
 zone_b:
-  x: 4.5
-  y: -12.0
+  x: 0.5
+  y: -4.2
   yaw: 0.0
 
 zone_c:
-  x: 4.5
-  y: -13.0
+  x: -8.3
+  y: -6.5
   yaw: 0.0
 
 mapping:

@@ -59,7 +59,7 @@ ros2 run yzbot_task task_sm
 ros2 topic pub --once /task_command std_msgs/msg/String "{data: '[red,1,A]'}"
 ```
 
-放置区在地图下方约 `(5, -11)`（A），与旧 room 地图不同。
+放置区分三间（隔墙、开阔）：A 南厅 (5.4,-11.8)、B 中厅 (0.5,-4.2)、C 西侧 (-8.3,-6.5)。
 
 若导航不稳，可先瞬移再只测臂+吸附：
 
