@@ -22,7 +22,7 @@
 ## 编译
 
 ```bash
-cd ~/dev_ws
+cd ~/dev_ws/yzbot
 source /opt/ros/humble/setup.bash
 colcon build --packages-select yzbot_task --symlink-install
 source install/setup.bash
@@ -32,8 +32,8 @@ source install/setup.bash
 
 ```bash
 source /opt/ros/humble/setup.bash
-source ~/dev_ws/install/setup.bash
-python3 -m pytest ~/dev_ws/src/yzbot/yzbot_task/test -q
+source ~/dev_ws/yzbot/install/setup.bash
+python3 -m pytest ~/dev_ws/yzbot/src/yzbot_task/test -q
 ```
 
 ## 干跑状态机（只打印步骤）
@@ -64,7 +64,7 @@ ros2 topic pub --once /task_command std_msgs/msg/String "{data: '[red,1,A]'}"
 若导航不稳，可先瞬移再只测臂+吸附：
 
 ```bash
-cd ~/dev_ws/src/yzbot/phase_a
+cd ~/dev_ws/yzbot/src/phase_a
 bash teleport_near_red.sh
 bash set_initial_pose.sh -0.7 1.0 3.1416
 ros2 run yzbot_task task_sm --ros-args -p skip_nav:=true

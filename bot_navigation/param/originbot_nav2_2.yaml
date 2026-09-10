@@ -25,17 +25,18 @@ amcl:
     pf_err: 0.03
     pf_z: 0.99
     # High fast recovery makes particle cloud jump ("点图一直在变")
+    # 极小 slow recovery：二次 2D Pose 后若略偏，还能慢慢拉回来，不至于站死
     recovery_alpha_fast: 0.0
-    recovery_alpha_slow: 0.0
-    resample_interval: 2
+    recovery_alpha_slow: 0.001
+    resample_interval: 1
     robot_model_type: "nav2_amcl::DifferentialMotionModel"
     save_pose_rate: 0.5
     sigma_hit: 0.2
     tf_broadcast: true
     transform_tolerance: 1.0
-    # Update a bit more often for tracking, but trust laser more (below)
-    update_min_a: 0.15
-    update_min_d: 0.15
+    # 略勤更新，减少「定位好了但不跟扫」导致乱走
+    update_min_a: 0.10
+    update_min_d: 0.10
     z_hit: 0.75
     z_max: 0.05
     z_rand: 0.2
@@ -80,8 +81,9 @@ controller_server:
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
-      required_movement_radius: 0.5
-      movement_time_allowance: 10.0
+      required_movement_radius: 0.20
+      # 减速/蹭住几秒 → 判无进展 → BT 清图+后退+重规划（禁止永远站着）
+      movement_time_allowance: 3.0
 
     general_goal_checker:
       stateful: True
@@ -125,17 +127,16 @@ controller_server:
         enabled: true
       BaseObstacle:
         enabled: true
-        # 局部躲障；不靠超大膨胀堵死走廊
-        scale: 36.0
+        scale: 45.0
       GoalAlign:
         enabled: true
         scale: 12.0
       PathAlign:
         enabled: true
-        scale: 24.0
+        scale: 20.0
       PathDist:
         enabled: true
-        scale: 28.0
+        scale: 24.0
       GoalDist:
         enabled: true
         scale: 24.0
@@ -152,14 +153,13 @@ local_costmap:
       width: 3
       height: 3
       resolution: 0.05
-      # 贴近真实轮距；膨胀要小，否则窄通道红色连成一片
-      # 侧轮外沿约 ±0.40；略放大防过中间墙时轮缘擦墙（走廊仍可通过）
-      footprint: "[[0.44, 0.46], [0.44, -0.46], [-0.42, -0.46], [-0.42, 0.46]]"
-      footprint_padding: 0.04
+      # 平衡：真车轮外沿≈±0.40；略留余量防蹭墙，但不涂满走廊（乱绕/站死）
+      footprint: "[[0.38, 0.43], [0.38, -0.43], [-0.36, -0.43], [-0.36, 0.43]]"
+      footprint_padding: 0.03
       plugins: ["voxel_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 5.0
+        cost_scaling_factor: 3.0
         inflation_radius: 0.45
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
@@ -194,8 +194,8 @@ global_costmap:
       publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_footprint
-      footprint: "[[0.44, 0.46], [0.44, -0.46], [-0.42, -0.46], [-0.42, 0.46]]"
-      footprint_padding: 0.04
+      footprint: "[[0.38, 0.43], [0.38, -0.43], [-0.36, -0.43], [-0.36, 0.43]]"
+      footprint_padding: 0.03
       resolution: 0.05
       track_unknown_space: true
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
@@ -218,7 +218,7 @@ global_costmap:
         map_subscribe_transient_local: True
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 5.0
+        cost_scaling_factor: 3.0
         inflation_radius: 0.45
       always_send_full_costmap: True
 
@@ -247,7 +247,7 @@ planner_server:
     GridBased:
       plugin: "nav2_navfn_planner/NavfnPlanner"
       tolerance: 0.5
-      use_astar: false
+      use_astar: true
       allow_unknown: true
 
 smoother_server:
@@ -327,24 +327,17 @@ collision_monitor:
     source_timeout: 1.0
     base_shift_correction: True
     stop_pub_timeout: 2.0
-    # 两圈：大圈减速（还能跟规划走）→ 小圈才硬停
-    polygons: ["PolygonSlow", "PolygonStop"]
+    # 不要硬停：硬停会把 cmd_vel 掐死，车像「永远不动」。
+    # 只减速；卡住由 progress_checker → BT recovery（清图/后退/重规划）接手。
+    polygons: ["PolygonSlow"]
     PolygonSlow:
       type: "circle"
-      radius: 0.70
+      radius: 0.55
       action_type: "slowdown"
       min_points: 4
-      slowdown_ratio: 0.35
+      slowdown_ratio: 0.30
       visualize: True
       polygon_pub_topic: "polygon_slowdown"
-      enabled: True
-    PolygonStop:
-      type: "circle"
-      radius: 0.38
-      action_type: "stop"
-      min_points: 4
-      visualize: True
-      polygon_pub_topic: "polygon_stop"
       enabled: True
     observation_sources: ["scan"]
     scan:

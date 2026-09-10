@@ -262,11 +262,11 @@ class TaskStateMachine(Node):
         self._pub_status("NAV_OK + POSE_GATE_OK (chassis STOP, axis-aligned)")
         return True
 
-    def _publish_dbg(self, bgr, blob, label: str):
+    def _publish_dbg(self, bgr, blob, label: str, prefer_uv=None):
         try:
             if bgr is None:
                 return
-            vis = annotate_bgr(bgr, blob, label=label)
+            vis = annotate_bgr(bgr, blob, label=label, prefer_uv=prefer_uv)
             msg = self._cv_bridge.cv2_to_imgmsg(vis, encoding="bgr8")
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = "camera_link"
@@ -571,7 +571,7 @@ class TaskStateMachine(Node):
 
         # 臂到位后再吸附（cube_control / ATTACHLINK）
         script = os.path.join(
-            os.path.expanduser("~/dev_ws/src/yzbot"), "cube_control.sh"
+            os.path.expanduser("~/dev_ws/yzbot/src"), "cube_control.sh"
         )
         self._pub_status(f"ATTACH → cube_control on {color} {cid} (arm already at PICK)")
         ok = False
@@ -615,7 +615,7 @@ class TaskStateMachine(Node):
             self.get_logger().warn("place pose failed; still try detach")
         self._pub_status(f"DETACH → cube_control off {color} {cid}")
         script = os.path.join(
-            os.path.expanduser("~/dev_ws/src/yzbot"), "cube_control.sh"
+            os.path.expanduser("~/dev_ws/yzbot/src"), "cube_control.sh"
         )
         ok = False
         if os.path.isfile(script):
@@ -696,8 +696,8 @@ class TaskStateMachine(Node):
                 self.motion.enter_local_mode(settle_sec=settle)
                 self.motion.stop_chassis()
                 try:
-                    def _on_oc(bgr, blob, phase: str):
-                        self._publish_dbg(bgr, blob, phase)
+                    def _on_oc(bgr, blob, phase: str, prefer_uv=None):
+                        self._publish_dbg(bgr, blob, phase, prefer_uv=prefer_uv)
 
                     aligned = self.motion.opencv_align_to_cube(
                         color,
@@ -746,15 +746,6 @@ class TaskStateMachine(Node):
                 return
 
             if not skip_nav:
-                # 夹完先倒车离开贴墙位，再去放置区（避免一启动就撞/拐弯刮中间墙）
-                self._pub_status("EXIT_RETREAT: 先后退离开墙再去放置区")
-                self.motion.enter_local_mode(settle_sec=0.3)
-                try:
-                    self.motion.retreat_along_heading(dist_m=0.50, speed=-0.12)
-                finally:
-                    self.motion.stop_chassis()
-                    self.motion.exit_local_mode()
-
                 self._pub_status(f"NAV_START → place zone {zone}")
                 if not self.motion.navigate_and_verify(
                     zx,

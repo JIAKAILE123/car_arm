@@ -6,7 +6,7 @@ Wrist-camera: grab ONE frame, HSV blob → joint1 delta (arm only, never Nav2).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np
@@ -42,9 +42,9 @@ def _hsv_mask(hsv: np.ndarray, color: str) -> np.ndarray:
     """Strict masks: cubes are saturated; brick walls are dull red/orange."""
     c = color.lower()
     if c == "red":
-        # High S/V → keep pure red cube (1,0,0); reject brick / wood
-        m1 = cv2.inRange(hsv, (0, 100, 70), (12, 255, 255))
-        m2 = cv2.inRange(hsv, (168, 100, 70), (180, 255, 255))
+        # Higher S → keep pure red cube; reject brick / opposite wall
+        m1 = cv2.inRange(hsv, (0, 110, 70), (12, 255, 255))
+        m2 = cv2.inRange(hsv, (168, 110, 70), (180, 255, 255))
         return cv2.bitwise_or(m1, m2)
     if c == "blue":
         return cv2.inRange(hsv, (95, 90, 50), (130, 255, 255))
@@ -97,11 +97,14 @@ def detect_blob(
     *,
     target_u: float = 0.0,
     target_v: float = 0.35,
+    prefer_uv: Optional[Tuple[float, float]] = None,
+    prefer_max_dist_frac: float = 0.25,
 ) -> Optional[BlobResult]:
     """Detect saturated cube blob; reject brick-wall false positives.
 
-    Prefers compact, high-sat patches near crosshair (default slightly below
-    center — floor cubes when parked at standoff).
+    prefer_uv: optional (u, v) in *original* image pixels (known-cube projection).
+    When set, only keep blobs within prefer_max_dist_frac * width of that point
+    so opposite red walls are ignored.
     """
     h0, w0 = bgr.shape[:2]
     scale = 1.0
@@ -116,7 +119,6 @@ def detect_blob(
     h, w = work.shape[:2]
     hsv = cv2.cvtColor(work, cv2.COLOR_BGR2HSV)
     mask = _hsv_mask(hsv, color)
-    # kill thin brick seams / noise
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k, iterations=1)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=1)
@@ -128,10 +130,17 @@ def detect_blob(
 
     tx = (0.5 + 0.5 * target_u) * w
     ty = (0.5 + 0.5 * target_v) * h
+    pref = None
+    if prefer_uv is not None:
+        pref = (float(prefer_uv[0]) * scale, float(prefer_uv[1]) * scale)
+        # aim score toward projection when available
+        tx, ty = pref[0], pref[1]
+    max_pref = float(prefer_max_dist_frac) * float(w)
+
     best: Optional[BlobResult] = None
     best_score = -1e18
+    sat_floor = 100.0 if color.lower() == "red" else 85.0
 
-    # also score by mean S in HSV for surviving ROI
     for cnt in contours:
         area = float(cv2.contourArea(cnt))
         x, y, bw, bh = cv2.boundingRect(cnt)
@@ -143,16 +152,18 @@ def detect_blob(
         if not _cube_like(area, bw, bh, cx, cy, w, h, mask, x, y):
             continue
 
+        if pref is not None:
+            if float(np.hypot(cx - pref[0], cy - pref[1])) > max_pref:
+                continue
+
         x1 = min(w, x + bw)
         y1 = min(h, y + bh)
         sat = float(np.mean(hsv[y:y1, x:x1, 1])) if y1 > y and x1 > x else 0.0
-        if sat < 85.0:
+        if sat < sat_floor:
             continue
 
         dist = float(np.hypot(cx - tx, cy - ty)) / max(float(w), 1.0)
-        # compact + saturated + near aim point
         score = (area * (0.5 + sat / 255.0)) / (1.0 + 10.0 * dist)
-        # slight preference for lower FOV (floor)
         score *= 0.7 + 0.3 * (cy / max(float(h), 1.0))
         if score > best_score:
             best_score = score
@@ -178,6 +189,7 @@ def annotate_bgr(
     target_u: float = 0.0,
     target_v: float = 0.0,
     label: str = "",
+    prefer_uv: Optional[Tuple[float, float]] = None,
 ) -> np.ndarray:
     """Draw center crosshair + bounding rect (cube must sit on the cross)."""
     out = bgr.copy()
@@ -187,6 +199,22 @@ def annotate_bgr(
     cv2.line(out, (tx, 0), (tx, h), (0, 255, 0), 2)
     cv2.line(out, (0, ty), (w, ty), (0, 255, 0), 1)
     cv2.drawMarker(out, (tx, ty), (0, 255, 0), cv2.MARKER_CROSS, 28, 2)
+    if prefer_uv is not None:
+        pu, pv = int(prefer_uv[0]), int(prefer_uv[1])
+        cv2.drawMarker(out, (pu, pv), (255, 0, 255), cv2.MARKER_TILTED_CROSS, 22, 2)
+        cv2.putText(
+            out,
+            "MAP_PROJ",
+            (pu + 8, max(16, pv - 8)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (255, 0, 255),
+            1,
+            cv2.LINE_AA,
+        )
+        # gate radius visualization
+        rad = int(0.25 * w)
+        cv2.circle(out, (pu, pv), rad, (255, 0, 255), 1)
     if blob is not None:
         sx = w / max(blob.image_w, 1)
         sy = h / max(blob.image_h, 1)

@@ -2,8 +2,8 @@
 # 阶段 A：一键开 4 个终端标签（Gazebo / MoveIt / Nav2 / rosbridge）
 set -euo pipefail
 
-WS="${HOME}/dev_ws"
-SRC="${WS}/src/yzbot"
+WS="${HOME}/dev_ws/yzbot"
+SRC="${WS}/src"
 SETUP="source /opt/ros/humble/setup.bash && source ${WS}/install/setup.bash"
 
 if [[ ! -f "${WS}/install/setup.bash" ]]; then

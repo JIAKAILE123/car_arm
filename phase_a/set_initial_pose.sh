@@ -3,7 +3,7 @@
 set -eo pipefail
 set +u
 source /opt/ros/humble/setup.bash
-source "${HOME}/dev_ws/install/setup.bash"
+source "${HOME}/dev_ws/yzbot/install/setup.bash"
 set -u
 
 X="${1:-0.0}"

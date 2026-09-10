@@ -25,7 +25,7 @@ def generate_launch_description():
     default_bt_xml = os.path.join(
         navigation2_dir, 'behavior_trees', 'navigate_stable.xml'
     )
-    # Inject stable BT path into params (replan only if path invalid)
+    # Inject BT: periodic replan + recovery (stuck near door → backup/replan)
     nav2_param_path = ReplaceString(
         source_file=raw_params,
         replacements={'<nav_bt_xml>': default_bt_xml},

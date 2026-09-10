@@ -91,9 +91,9 @@ __VIDEO: Pick and Place Task - ROS2 Gazebo Simulation (UR3 + Robotiq 2f-85)__
 Both packages in this repository have been developed, executed and tested in a Ubuntu 22.04 machine with ROS 2 Humble (the plugin has not been tested in other ROS2 distributions yet). It can be easily downloaded and installed by executing the following commands:
 
 ```sh
-cd ~/dev_ws/src
+cd ~/dev_ws/yzbot/src
 git clone https://github.com/IFRA-Cranfield/IFRA_LinkAttacher.git
-cd ~/dev_ws
+cd ~/dev_ws/yzbot
 colcon build
 ```
 

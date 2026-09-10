@@ -246,10 +246,12 @@ class CamFpv(Node):
         proj = self._project_target(w, h)
         if proj is not None:
             u, v, zc = proj
+            gate_r = int(0.25 * w)
+            cv2.circle(out, (u, v), gate_r, (255, 0, 255), 1)
             cv2.circle(out, (u, v), 14, (255, 0, 255), 2)
             cv2.line(out, (cx_i, cy_i), (u, v), (255, 0, 255), 2)
             lat = (u - cx_i) / max(w * 0.5, 1.0)
-            lines.append(f"proj u_err={lat:.2f} z={zc:.2f}m")
+            lines.append(f"MAP_PROJ u_err={lat:.2f} z={zc:.2f}m gate=0.25w")
             if abs(lat) < 0.08:
                 lines.append("CUBE_ON_CENTER (facing)")
                 color = (0, 255, 0)
@@ -258,7 +260,7 @@ class CamFpv(Node):
                 color = (0, 165, 255)
             cv2.putText(
                 out,
-                "CUBE",
+                "MAP_PROJ",
                 (u + 10, v - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
@@ -266,7 +268,7 @@ class CamFpv(Node):
                 2,
             )
         else:
-            lines.append("no cube proj (wait PARK / camera_info)")
+            lines.append("no MAP_PROJ (wait PARK / camera_info)")
 
         y0 = h - 18 * (len(lines) + 1)
         for i, t in enumerate(lines):

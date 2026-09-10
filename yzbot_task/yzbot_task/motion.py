@@ -229,6 +229,11 @@ class MotionHelpers:
             self.node.get_logger().warn("navigate blocked until MODE_NAV; forcing exit_local")
             self.exit_local_mode()
 
+        # 取消上一次目标，避免「第二次发目标车不动 / 旧 BT 卡死」
+        self.cancel_nav()
+        self.stop_chassis()
+        time.sleep(0.15)
+
         pose = PoseStamped()
         pose.header.frame_id = "map"
         pose.header.stamp = self.node.get_clock().now().to_msg()
@@ -387,37 +392,6 @@ class MotionHelpers:
         self.drive_owner = "nav"
         self.node.get_logger().info("MODE_NAV (Nav2 owns cmd_vel)")
 
-    def retreat_along_heading(
-        self,
-        *,
-        dist_m: float = 0.45,
-        speed: float = -0.12,
-        timeout: float = 6.0,
-    ) -> bool:
-        """Open-loop reverse along base −x (away from cube after pick).
-
-        Park faces the cube; reversing pulls the base into open space before
-        place-nav turns — avoids immediate mid-wall scrape + spin-into-wall.
-        """
-        if self.drive_owner != "local":
-            self.node.get_logger().error("retreat_along_heading needs MODE_LOCAL")
-            return False
-        dist_m = abs(float(dist_m))
-        speed = -abs(float(speed))  # always reverse
-        if dist_m < 0.05:
-            return True
-        dur = min(float(timeout), dist_m / max(abs(speed), 0.05))
-        self.node.get_logger().info(
-            f"EXIT_RETREAT dist={dist_m:.2f}m speed={speed:.2f} (~{dur:.1f}s)"
-        )
-        t0 = time.time()
-        while time.time() - t0 < dur:
-            self.publish_cmd_vel(speed, 0.0)
-            time.sleep(0.05)
-        self.stop_chassis()
-        time.sleep(0.3)
-        return True
-
     def align_yaw_optional(
         self,
         color: str,
@@ -505,6 +479,61 @@ class MotionHelpers:
         self.node.get_logger().error(f"AIM_MAP_FAIL rem={rem:+.3f}")
         return False
 
+    def project_known_cube_uv(
+        self, color: str, cube_id: int
+    ) -> Optional[Tuple[float, float]]:
+        """Map known cube → front-camera pixel (u, v) for detect_blob gate."""
+        from yzbot_task.vision_pose import known_cube_xy
+        from geometry_msgs.msg import PointStamped
+
+        if self._front_cinfo is None:
+            return None
+        try:
+            x, y, z = known_cube_xy(color, cube_id)
+        except Exception:  # noqa: BLE001
+            return None
+        cam = self._front_frame or "camera_link"
+        ps = PointStamped()
+        ps.header.frame_id = "map"
+        ps.header.stamp = self.node.get_clock().now().to_msg()
+        ps.point.x = float(x)
+        ps.point.y = float(y)
+        ps.point.z = float(z)
+        try:
+            tf = self.tf_buffer.lookup_transform(
+                cam,
+                "map",
+                rclpy.time.Time(),
+                timeout=Duration(seconds=0.05),
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        q = tf.transform.rotation
+        t = tf.transform.translation
+        qw, qx, qy, qz = float(q.w), float(q.x), float(q.y), float(q.z)
+        tx, ty, tz = float(ps.point.x), float(ps.point.y), float(ps.point.z)
+        ix = 1 - 2 * (qy * qy + qz * qz)
+        iy = 2 * (qx * qy - qz * qw)
+        iz = 2 * (qx * qz + qy * qw)
+        jx = 2 * (qx * qy + qz * qw)
+        jy = 1 - 2 * (qx * qx + qz * qz)
+        jz = 2 * (qy * qz - qx * qw)
+        kx = 2 * (qx * qz - qy * qw)
+        ky = 2 * (qy * qz + qx * qw)
+        kz = 1 - 2 * (qx * qx + qy * qy)
+        px = ix * tx + iy * ty + iz * tz + float(t.x)
+        py = jx * tx + jy * ty + jz * tz + float(t.y)
+        pz = kx * tx + ky * ty + kz * tz + float(t.z)
+        if pz <= 0.05:
+            return None
+        fx = float(self._front_cinfo.k[0])
+        fy = float(self._front_cinfo.k[4])
+        cx = float(self._front_cinfo.k[2])
+        cy = float(self._front_cinfo.k[5])
+        u = fx * (px / pz) + cx
+        v = fy * (py / pz) + cy
+        return float(u), float(v)
+
     def opencv_align_to_cube(
         self,
         color: str,
@@ -531,7 +560,7 @@ class MotionHelpers:
 
         self.node.get_logger().info(
             f"OPENCV_ALIGN start {color}_{cube_id} target_r={target_r:.2f} "
-            f"(wz+vx 车体对准)"
+            f"(wz+vx 车体对准; map投影门控防认墙)"
         )
         t0 = time.time()
         ok_streak = 0
@@ -539,12 +568,18 @@ class MotionHelpers:
 
         while time.time() - t0 < timeout:
             bgr = self.grab_front_bgr()
-            blob = detect_blob(bgr, color, target_v=0.35) if bgr is not None else None
+            prefer = self.project_known_cube_uv(color, cube_id)
+            blob = None
+            if bgr is not None:
+                blob = detect_blob(
+                    bgr,
+                    color,
+                    target_v=0.35,
+                    prefer_uv=prefer,
+                    prefer_max_dist_frac=0.25,
+                )
             if on_frame is not None and bgr is not None:
-                on_frame(bgr, blob, "OC_ALIGN")
-            if blob is None and bgr is not None and on_frame is not None:
-                # still push frame so FPV shows empty lock
-                pass
+                on_frame(bgr, blob, "OC_ALIGN", prefer)
 
             bearing = None
             rng = None
@@ -595,7 +630,8 @@ class MotionHelpers:
                 f"OPENCV_ALIGN vx={vx:+.2f} wz={wz:+.2f} "
                 f"err_u={('n/a' if err_u is None else f'{err_u:+.3f}')} "
                 f"bear={('n/a' if bearing is None else f'{bearing:+.3f}')} "
-                f"r={('n/a' if rng is None else f'{rng:.2f}')}",
+                f"r={('n/a' if rng is None else f'{rng:.2f}')} "
+                f"proj={'yes' if prefer else 'no'}",
                 throttle_duration_sec=0.35,
             )
 

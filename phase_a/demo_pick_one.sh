@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 set +u
 source /opt/ros/humble/setup.bash
-source "${HOME}/dev_ws/install/setup.bash"
+source "${HOME}/dev_ws/yzbot/install/setup.bash"
 set -u
 
 echo "=== demo_pick_one: ${COLOR} ${ID} ==="
