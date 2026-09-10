@@ -194,8 +194,8 @@ global_costmap:
       publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_footprint
-      footprint: "[[0.42, 0.43], [0.42, -0.43], [-0.42, -0.43], [-0.42, 0.43]]"
-      footprint_padding: 0.03
+      footprint: "[[0.44, 0.46], [0.44, -0.46], [-0.42, -0.46], [-0.42, 0.46]]"
+      footprint_padding: 0.04
       resolution: 0.05
       track_unknown_space: true
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
