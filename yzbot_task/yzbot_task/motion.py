@@ -888,16 +888,21 @@ class MotionHelpers:
         )
 
     def arm_carry_pose(self, j1: float = 0.0) -> bool:
-        """Fold arm compact over base while driving (less forward stick → less wall hit)."""
+        """Fold arm tight over base while driving (exit corridors / middle walls).
+
+        Prior end still stuck forward → scraped walls on place-nav after pick.
+        Final pose keeps EE near base so 2D footprint better matches reality.
+        """
         j1 = float(j1)
-        self.node.get_logger().info("ARM carry pose (tucked)")
+        self.node.get_logger().info("ARM carry pose (tucked tight)")
         return self._send_traj(
             self.arm,
             ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
             [
-                ([j1, 1.2, 1.17, 0.0, -0.3, 0.0], 0, 500),
-                ([0.0, 0.35, 1.15, 0.0, -0.9, 0.0], 2.5, 0),
-                ([0.0, 0.15, 1.25, 0.0, -1.1, 0.0], 4.5, 0),
+                ([j1, 1.15, 1.15, 0.0, -0.4, 0.0], 0, 400),
+                ([0.0, 0.35, 1.10, 0.0, -0.95, 0.0], 2.0, 0),
+                # 收得更靠车体，减少过中间墙时臂尖/夹爪刮墙
+                ([0.0, 0.08, 1.35, 0.0, -1.25, 0.0], 4.0, 0),
             ],
         )
 

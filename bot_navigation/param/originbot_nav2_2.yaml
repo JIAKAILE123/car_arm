@@ -153,8 +153,9 @@ local_costmap:
       height: 3
       resolution: 0.05
       # 贴近真实轮距；膨胀要小，否则窄通道红色连成一片
-      footprint: "[[0.42, 0.43], [0.42, -0.43], [-0.42, -0.43], [-0.42, 0.43]]"
-      footprint_padding: 0.03
+      # 侧轮外沿约 ±0.40；略放大防过中间墙时轮缘擦墙（走廊仍可通过）
+      footprint: "[[0.44, 0.46], [0.44, -0.46], [-0.42, -0.46], [-0.42, 0.46]]"
+      footprint_padding: 0.04
       plugins: ["voxel_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"

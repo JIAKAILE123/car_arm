@@ -601,7 +601,8 @@ class TaskStateMachine(Node):
         else:
             self._pub_status("MTC_LIFT_OK")
         self.motion.stop_chassis()
-        time.sleep(1.5)
+        # 等臂收稳再导航出门，避免中间墙刮臂
+        time.sleep(2.0)
         return True
 
     def _place_with_moveit(self, color: str, cid: int) -> bool:
