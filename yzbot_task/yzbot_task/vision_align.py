@@ -39,15 +39,55 @@ class BlobResult:
 
 
 def _hsv_mask(hsv: np.ndarray, color: str) -> np.ndarray:
+    """Strict masks: cubes are saturated; brick walls are dull red/orange."""
     c = color.lower()
     if c == "red":
-        # Wider for Gazebo materials / lighting
-        m1 = cv2.inRange(hsv, (0, 40, 40), (15, 255, 255))
-        m2 = cv2.inRange(hsv, (165, 40, 40), (180, 255, 255))
+        # High S/V → keep pure red cube (1,0,0); reject brick / wood
+        m1 = cv2.inRange(hsv, (0, 100, 70), (12, 255, 255))
+        m2 = cv2.inRange(hsv, (168, 100, 70), (180, 255, 255))
         return cv2.bitwise_or(m1, m2)
     if c == "blue":
-        return cv2.inRange(hsv, (90, 40, 40), (135, 255, 255))
+        return cv2.inRange(hsv, (95, 90, 50), (130, 255, 255))
     raise ValueError(f"unsupported color: {color}")
+
+
+def _cube_like(
+    area: float,
+    bw: int,
+    bh: int,
+    cx: float,
+    cy: float,
+    w: int,
+    h: int,
+    mask: np.ndarray,
+    x: int,
+    y: int,
+) -> bool:
+    """Reject wall patches: too big, too elongated, low fill, top-of-frame."""
+    img_a = float(max(w * h, 1))
+    frac = area / img_a
+    # 3cm cube at ~0.4–1.5m is small; wall patches are huge
+    if frac > 0.08:
+        return False
+    if area < 12:
+        return False
+    aspect = float(bw) / float(max(bh, 1))
+    if aspect < 0.40 or aspect > 2.5:
+        return False
+    # extent: contour area vs bbox
+    extent = area / float(max(bw * bh, 1))
+    if extent < 0.25:
+        return False
+    # walls often fill upper FOV; cubes sit mid/lower when parked
+    if cy < 0.12 * h:
+        return False
+    # mean saturation inside bbox — cubes high S, bricks lower
+    x1 = min(w, x + bw)
+    y1 = min(h, y + bh)
+    roi = mask[y:y1, x:x1]
+    if roi.size < 4:
+        return False
+    return True
 
 
 def detect_blob(
@@ -56,20 +96,32 @@ def detect_blob(
     max_width: int = 320,
     *,
     target_u: float = 0.0,
-    target_v: float = 0.0,
+    target_v: float = 0.35,
 ) -> Optional[BlobResult]:
-    """Pick the color blob nearest the crosshair (not just largest).
+    """Detect saturated cube blob; reject brick-wall false positives.
 
-    With 5 cubes in one FOV, largest can be the wrong neighbor.
+    Prefers compact, high-sat patches near crosshair (default slightly below
+    center — floor cubes when parked at standoff).
     """
     h0, w0 = bgr.shape[:2]
+    scale = 1.0
+    work = bgr
     if w0 > max_width:
         scale = max_width / float(w0)
-        bgr = cv2.resize(bgr, (int(w0 * scale), int(h0 * scale)), interpolation=cv2.INTER_AREA)
-    h, w = bgr.shape[:2]
-    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+        work = cv2.resize(
+            bgr,
+            (int(w0 * scale), int(h0 * scale)),
+            interpolation=cv2.INTER_AREA,
+        )
+    h, w = work.shape[:2]
+    hsv = cv2.cvtColor(work, cv2.COLOR_BGR2HSV)
     mask = _hsv_mask(hsv, color)
+    # kill thin brick seams / noise
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=1)
     mask = cv2.medianBlur(mask, 5)
+
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
@@ -78,19 +130,30 @@ def detect_blob(
     ty = (0.5 + 0.5 * target_v) * h
     best: Optional[BlobResult] = None
     best_score = -1e18
+
+    # also score by mean S in HSV for surviving ROI
     for cnt in contours:
         area = float(cv2.contourArea(cnt))
-        if area < 20:
-            continue
+        x, y, bw, bh = cv2.boundingRect(cnt)
         m = cv2.moments(cnt)
         if m["m00"] <= 1e-6:
             continue
         cx = float(m["m10"] / m["m00"])
         cy = float(m["m01"] / m["m00"])
-        x, y, bw, bh = cv2.boundingRect(cnt)
-        # Prefer near crosshair; slight bonus for larger area
+        if not _cube_like(area, bw, bh, cx, cy, w, h, mask, x, y):
+            continue
+
+        x1 = min(w, x + bw)
+        y1 = min(h, y + bh)
+        sat = float(np.mean(hsv[y:y1, x:x1, 1])) if y1 > y and x1 > x else 0.0
+        if sat < 85.0:
+            continue
+
         dist = float(np.hypot(cx - tx, cy - ty)) / max(float(w), 1.0)
-        score = float(area) / (1.0 + 8.0 * dist)
+        # compact + saturated + near aim point
+        score = (area * (0.5 + sat / 255.0)) / (1.0 + 10.0 * dist)
+        # slight preference for lower FOV (floor)
+        score *= 0.7 + 0.3 * (cy / max(float(h), 1.0))
         if score > best_score:
             best_score = score
             best = BlobResult(
@@ -145,6 +208,17 @@ def annotate_bgr(
             0.55,
             (0, 255, 0) if locked else (0, 255, 255),
             1,
+            cv2.LINE_AA,
+        )
+    else:
+        cv2.putText(
+            out,
+            "NO_CUBE (wall/noise filtered)",
+            (8, 22),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (0, 0, 255),
+            2,
             cv2.LINE_AA,
         )
     if label:

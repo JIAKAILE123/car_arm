@@ -22,6 +22,7 @@ from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
 from std_msgs.msg import String
+from geometry_msgs.msg import PointStamped
 from ament_index_python.packages import get_package_share_directory
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
@@ -114,6 +115,9 @@ class TaskStateMachine(Node):
 
         self.status_pub = self.create_publisher(String, "/task_status", 10)
         self.info_pub = self.create_publisher(String, "/task_info", 10)
+        self.grasp_target_pub = self.create_publisher(
+            PointStamped, "/yzbot/grasp_target", 10
+        )
         self.create_subscription(
             String,
             "/task_command",
@@ -212,7 +216,13 @@ class TaskStateMachine(Node):
                 if standoff_m is None
                 else float(standoff_m)
             )
-            return approach_xy_for_cube(color, cid, standoff_m=so)
+            robot_xy = None
+            cur = self.motion.get_base_xy_yaw_map()
+            if cur is not None:
+                robot_xy = (cur[0], cur[1])
+            return approach_xy_for_cube(
+                color, cid, standoff_m=so, robot_xy=robot_xy
+            )
         return self._pose(f"{color}_approach")
 
     def _nav_to_pick(
@@ -225,10 +235,19 @@ class TaskStateMachine(Node):
             else float(standoff_m)
         )
         mx, my, mz = known_cube_xy(color, cid)
+        axis = "同y沿x(baseX//mapX)" if abs(ay - my) < 1e-6 else "同x沿y(baseX//mapY)"
+        # OpenCV FPV assist: publish cube map point for projection
+        tgt = PointStamped()
+        tgt.header.frame_id = "map"
+        tgt.header.stamp = self.get_clock().now().to_msg()
+        tgt.point.x = float(mx)
+        tgt.point.y = float(my)
+        tgt.point.z = float(mz)
+        self.grasp_target_pub.publish(tgt)
         self._pub_status(
-            f"PARK_FIXED {color}_cube_{cid} 前方 "
+            f"PARK_AXIS {color}_cube_{cid} {axis} "
             f"({ax:.2f},{ay:.2f},yaw={ayaw:.2f}) | "
-            f"物块固定坐标 map≈({mx:.2f},{my:.2f},{mz:.3f}) standoff={so:.2f}m"
+            f"cube=({mx:.2f},{my:.2f}) standoff={so:.2f}m"
         )
         self.motion.exit_local_mode()
         xy_tol = float(self.get_parameter("pose_gate_xy").value)
@@ -240,7 +259,7 @@ class TaskStateMachine(Node):
             self._pub_status(f"NAV_PICK_FAIL / POSE_GATE_FAIL {color}_{cid}")
             return False
         self.motion.stop_chassis()
-        self._pub_status("NAV_OK + POSE_GATE_OK (chassis STOP)")
+        self._pub_status("NAV_OK + POSE_GATE_OK (chassis STOP, axis-aligned)")
         return True
 
     def _publish_dbg(self, bgr, blob, label: str):
@@ -667,6 +686,45 @@ class TaskStateMachine(Node):
 
             pick_ok = False
             if mode in ("known_coords", "known", "map", "coord", "attach_only"):
+                # 导航落地后：OpenCV+TF 转动+前后，把车体对准物块
+                settle = float(self.get_parameter("local_settle_sec").value)
+                so = float(self.get_parameter("grasp_standoff_m").value)
+                self._pub_status(
+                    "OPENCV_ALIGN: 导航后微调（转动+前后，车体对准块）"
+                )
+                self.motion.enter_local_mode(settle_sec=settle)
+                self.motion.stop_chassis()
+                try:
+                    def _on_oc(bgr, blob, phase: str):
+                        self._publish_dbg(bgr, blob, phase)
+
+                    aligned = self.motion.opencv_align_to_cube(
+                        color,
+                        cid,
+                        target_r=so,
+                        r_tol=float(self.get_parameter("visual_r_tol").value),
+                        err_ok=min(
+                            0.05, float(self.get_parameter("lock_max_err_u").value)
+                        ),
+                        yaw_gain=float(self.get_parameter("align_yaw_gain").value),
+                        timeout=max(
+                            16.0, float(self.get_parameter("lock_timeout").value)
+                        ),
+                        on_frame=_on_oc,
+                    )
+                    if aligned:
+                        self._pub_status("OPENCV_ALIGN_OK → 预设下探")
+                    else:
+                        self._pub_status(
+                            "OPENCV_ALIGN_FAIL (未对准，不下探)"
+                        )
+                        self.motion.stop_chassis()
+                        self.motion.exit_local_mode()
+                        return
+                finally:
+                    self.motion.stop_chassis()
+                    self.motion.exit_local_mode()
+
                 self.motion.stop_chassis()
                 self._pub_status("PICK: 预设下探 → 吸附")
                 pick_ok = self._pick_known_coords(color, cid)

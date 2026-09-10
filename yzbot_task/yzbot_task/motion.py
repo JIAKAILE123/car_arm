@@ -474,6 +474,130 @@ class MotionHelpers:
         self.node.get_logger().error(f"AIM_MAP_FAIL rem={rem:+.3f}")
         return False
 
+    def opencv_align_to_cube(
+        self,
+        color: str,
+        cube_id: int,
+        *,
+        target_r: float = 0.40,
+        r_tol: float = 0.05,
+        err_ok: float = 0.045,
+        yaw_gain: float = 1.15,
+        vx_gain: float = 0.45,
+        max_wz: float = 0.40,
+        max_vx: float = 0.10,
+        timeout: float = 18.0,
+        stable_hold_sec: float = 0.40,
+        min_area: float = 40.0,
+        on_frame=None,
+    ) -> bool:
+        """Nav后对准：OpenCV+TF，可旋转也可前进/后退，把车体对准物块。"""
+        from yzbot_task.vision_pose import cube_bearing_in_base
+
+        if self.drive_owner != "local":
+            self.node.get_logger().error("opencv_align_to_cube needs MODE_LOCAL")
+            return False
+
+        self.node.get_logger().info(
+            f"OPENCV_ALIGN start {color}_{cube_id} target_r={target_r:.2f} "
+            f"(wz+vx 车体对准)"
+        )
+        t0 = time.time()
+        ok_streak = 0
+        stable_t0: Optional[float] = None
+
+        while time.time() - t0 < timeout:
+            bgr = self.grab_front_bgr()
+            blob = detect_blob(bgr, color, target_v=0.35) if bgr is not None else None
+            if on_frame is not None and bgr is not None:
+                on_frame(bgr, blob, "OC_ALIGN")
+            if blob is None and bgr is not None and on_frame is not None:
+                # still push frame so FPV shows empty lock
+                pass
+
+            bearing = None
+            rng = None
+            info = cube_bearing_in_base(self.tf_buffer, color, cube_id)
+            if info is not None:
+                bearing, rng, _xyz = info
+                bearing = float(bearing)
+                rng = float(rng)
+
+            err_u = None
+            if blob is not None and float(blob.area) >= min_area:
+                err_u = float(blob.err_u)
+
+            wz = 0.0
+            if err_u is not None:
+                wz = blob_to_yaw_cmd(blob, gain=yaw_gain, max_wz=max_wz)
+            elif bearing is not None:
+                wz = float(max(-max_wz, min(max_wz, 1.3 * bearing)))
+
+            vx = 0.0
+            face_ok = False
+            if err_u is not None:
+                face_ok = abs(err_u) < 0.22
+            elif bearing is not None:
+                face_ok = abs(bearing) < 0.30
+
+            if face_ok and rng is not None:
+                dr = float(rng) - float(target_r)
+                if abs(dr) > r_tol * 0.5:
+                    vx = float(max(-max_vx, min(max_vx, vx_gain * dr)))
+                    if err_u is not None and abs(err_u) > 0.10:
+                        vx *= 0.35
+            elif face_ok and err_u is not None and blob is not None:
+                frac = float(blob.area) / max(float(blob.image_w * blob.image_h), 1.0)
+                if frac < 0.012:
+                    vx = 0.06
+                elif frac > 0.08:
+                    vx = -0.05
+
+            yaw_ok = False
+            if err_u is not None:
+                yaw_ok = abs(err_u) <= err_ok
+            elif bearing is not None:
+                yaw_ok = abs(bearing) < 0.08
+            range_ok = rng is None or abs(float(rng) - float(target_r)) <= r_tol
+
+            self.node.get_logger().info(
+                f"OPENCV_ALIGN vx={vx:+.2f} wz={wz:+.2f} "
+                f"err_u={('n/a' if err_u is None else f'{err_u:+.3f}')} "
+                f"bear={('n/a' if bearing is None else f'{bearing:+.3f}')} "
+                f"r={('n/a' if rng is None else f'{rng:.2f}')}",
+                throttle_duration_sec=0.35,
+            )
+
+            if yaw_ok and range_ok and (err_u is not None or bearing is not None):
+                ok_streak += 1
+                self.publish_cmd_vel(0.0, 0.0)
+                if ok_streak >= 3:
+                    if stable_t0 is None:
+                        stable_t0 = time.time()
+                        self.node.get_logger().info("OPENCV_ALIGN_OK → hold")
+                    elif time.time() - stable_t0 >= stable_hold_sec:
+                        self.stop_chassis()
+                        self.node.get_logger().info(
+                            f"OPENCV_ALIGN_STABLE err_u={err_u} r={rng}"
+                        )
+                        return True
+            else:
+                ok_streak = 0
+                stable_t0 = None
+                if err_u is None and bearing is None:
+                    wz = 0.15
+                self.publish_cmd_vel(vx, wz)
+            time.sleep(0.08)
+
+        self.stop_chassis()
+        self.node.get_logger().error("OPENCV_ALIGN_TIMEOUT")
+        return False
+
+    def opencv_center_on_cube(self, color: str, **kwargs) -> bool:
+        """Yaw-only legacy wrapper → align with cube_id=1 fallback."""
+        cid = int(kwargs.pop("cube_id", 1))
+        return self.opencv_align_to_cube(color, cid, **kwargs)
+
     def face_center_then_range(
         self,
         color: str,

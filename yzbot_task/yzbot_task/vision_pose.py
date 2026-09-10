@@ -356,15 +356,41 @@ def pose_sanity_arm_base(pose: PoseStamped) -> Tuple[bool, str]:
 
 
 def approach_xy_for_cube(
-    color: str, cube_id: int, *, standoff_m: float = 0.35
+    color: str,
+    cube_id: int,
+    *,
+    standoff_m: float = 0.35,
+    robot_xy: Optional[Tuple[float, float]] = None,
 ) -> Tuple[float, float, float]:
-    """Map pose facing the cube at arm-reachable standoff (yaw=π → look −x).
+    """Park axis-aligned so robot base_X is parallel to map axis toward cube.
 
-    offic_room cubes at x≈−1.5..−1.9. Old approach x=−0.55 ⇒ ~0.95 m gap —
-    short arm cannot reach. Park at cube_x + standoff.
+    Prefer SAME map-Y (±x standoff, yaw 0/π) → base_X // map_X (your request).
+    Fall back to same map-X only if robot is clearly much closer on N/S side.
     """
     cx, cy, _z = known_cube_xy(color, cube_id)
-    return float(cx + standoff_m), float(cy), float(np.pi)
+    so = float(standoff_m)
+    same_y = [
+        (cx + so, cy, float(np.pi)),  # east, face −x
+        (cx - so, cy, 0.0),  # west, face +x
+    ]
+    same_x = [
+        (cx, cy + so, float(-np.pi / 2.0)),  # north, face −y
+        (cx, cy - so, float(np.pi / 2.0)),  # south, face +y
+    ]
+    if robot_xy is None:
+        return same_y[0]
+
+    rx, ry = float(robot_xy[0]), float(robot_xy[1])
+
+    def _d2(p):
+        return (p[0] - rx) ** 2 + (p[1] - ry) ** 2
+
+    best_y = min(same_y, key=_d2)
+    best_x = min(same_x, key=_d2)
+    # Prefer same-Y unless N/S park is clearly nearer (~0.45² ratio)
+    if _d2(best_x) < _d2(best_y) * 0.45:
+        return float(best_x[0]), float(best_x[1]), float(best_x[2])
+    return float(best_y[0]), float(best_y[1]), float(best_y[2])
 
 
 def diagnose_est_vs_known(
@@ -435,15 +461,15 @@ def ee_to_pose_distance_m(tf_buffer: Buffer, pose_arm: PoseStamped) -> Optional[
     return float(np.sqrt(dx * dx + dy * dy + dz * dz))
 
 
-# Scattered XY (seed=20260909); Z kept on floor (official state ~0.015), not mid-air.
-# Park uses approach_xy_for_cube → (x+standoff, y, yaw=π).
+# Scattered XY; Z on floor. Park = axis-aligned (same x or same y) + face cube.
+# Park uses approach_xy_for_cube → ±x/±y standoff, yaw ∈ {0,±π/2,π}.
 _KNOWN_CUBES = {
     ("red", 1): (-6.89, -2.80, 0.015),
     ("red", 2): (-2.89, -5.85, 0.015),
     ("red", 3): (-2.02, -4.50, 0.015),
     ("red", 4): (-2.77, 5.80, 0.015),
     ("red", 5): (-2.08, 3.66, 0.015),
-    ("blue", 1): (-6.18, 5.50, 0.015),
+    ("blue", 1): (-6.18, 4.20, 0.015),
     ("blue", 2): (-8.21, -5.21, 0.015),
     ("blue", 3): (-7.08, 2.35, 0.015),
     ("blue", 4): (-5.77, -5.28, 0.015),

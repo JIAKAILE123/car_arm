@@ -1577,10 +1577,10 @@
         </link>
       </model>
       <model name='blue_cube_1'>
-      <pose>-6.18 5.5 0.015 0 -0 0</pose>
+      <pose>-6.18 4.20 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>-6.18 5.5 0.015 0 -0 0</pose>
+          <pose>-6.18 4.20 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
@@ -2278,7 +2278,7 @@
       </link>
     </model>
     <model name='blue_cube_1'>
-      <pose>-6.18 5.5 0.015 0 -0 0</pose>
+      <pose>-6.18 4.20 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
           <mass>0.005</mass>
