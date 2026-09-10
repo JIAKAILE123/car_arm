@@ -387,6 +387,37 @@ class MotionHelpers:
         self.drive_owner = "nav"
         self.node.get_logger().info("MODE_NAV (Nav2 owns cmd_vel)")
 
+    def retreat_along_heading(
+        self,
+        *,
+        dist_m: float = 0.45,
+        speed: float = -0.12,
+        timeout: float = 6.0,
+    ) -> bool:
+        """Open-loop reverse along base −x (away from cube after pick).
+
+        Park faces the cube; reversing pulls the base into open space before
+        place-nav turns — avoids immediate mid-wall scrape + spin-into-wall.
+        """
+        if self.drive_owner != "local":
+            self.node.get_logger().error("retreat_along_heading needs MODE_LOCAL")
+            return False
+        dist_m = abs(float(dist_m))
+        speed = -abs(float(speed))  # always reverse
+        if dist_m < 0.05:
+            return True
+        dur = min(float(timeout), dist_m / max(abs(speed), 0.05))
+        self.node.get_logger().info(
+            f"EXIT_RETREAT dist={dist_m:.2f}m speed={speed:.2f} (~{dur:.1f}s)"
+        )
+        t0 = time.time()
+        while time.time() - t0 < dur:
+            self.publish_cmd_vel(speed, 0.0)
+            time.sleep(0.05)
+        self.stop_chassis()
+        time.sleep(0.3)
+        return True
+
     def align_yaw_optional(
         self,
         color: str,

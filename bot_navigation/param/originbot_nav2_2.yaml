@@ -93,21 +93,22 @@ controller_server:
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
       debug_trajectory_details: True
-      min_vel_x: 0.0
-      min_vel_y: 0.0
-      max_vel_x: 1.0
-      max_vel_y: 0.0          # 差速机器人无侧向速度
-      # 线速度保持 1.0
-      max_vel_theta: 1.0
+      # 线速度保持 1.0；角速度略降，拐弯少甩进墙
+      max_vel_theta: 0.70
       min_speed_xy: 0.0
       max_speed_xy: 1.0
       min_speed_theta: 0.0
       acc_lim_x: 2.5
       acc_lim_y: 0.0
-      acc_lim_theta: 2.0
+      acc_lim_theta: 1.2
+      # 贴墙起步可短距倒车，减少原地空转蹭墙
+      min_vel_x: -0.15
+      min_vel_y: 0.0
+      max_vel_x: 1.0
+      max_vel_y: 0.0          # 差速机器人无侧向速度
       decel_lim_x: -2.5
       decel_lim_y: 0.0
-      decel_lim_theta: -2.0
+      decel_lim_theta: -1.5
       vx_samples: 20
       vy_samples: 5
       vtheta_samples: 20

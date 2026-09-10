@@ -746,7 +746,15 @@ class TaskStateMachine(Node):
                 return
 
             if not skip_nav:
-                self.motion.exit_local_mode()
+                # 夹完先倒车离开贴墙位，再去放置区（避免一启动就撞/拐弯刮中间墙）
+                self._pub_status("EXIT_RETREAT: 先后退离开墙再去放置区")
+                self.motion.enter_local_mode(settle_sec=0.3)
+                try:
+                    self.motion.retreat_along_heading(dist_m=0.50, speed=-0.12)
+                finally:
+                    self.motion.stop_chassis()
+                    self.motion.exit_local_mode()
+
                 self._pub_status(f"NAV_START → place zone {zone}")
                 if not self.motion.navigate_and_verify(
                     zx,
