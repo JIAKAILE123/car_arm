@@ -81,9 +81,8 @@ controller_server:
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
-      required_movement_radius: 0.20
-      # 减速/蹭住几秒 → 判无进展 → BT 清图+后退+重规划（禁止永远站着）
-      movement_time_allowance: 3.0
+      required_movement_radius: 0.5
+      movement_time_allowance: 10.0
 
     general_goal_checker:
       stateful: True
@@ -91,7 +90,7 @@ controller_server:
       xy_goal_tolerance: 0.25
       yaw_goal_tolerance: 0.5
 
-    # DWB 控制器配置
+    # DWB 控制器配置（恢复 vision-v0.1 最初速度）
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
       debug_trajectory_details: True
@@ -127,16 +126,17 @@ controller_server:
         enabled: true
       BaseObstacle:
         enabled: true
-        scale: 45.0
+        # 局部躲障；不靠超大膨胀堵死走廊
+        scale: 36.0
       GoalAlign:
         enabled: true
         scale: 12.0
       PathAlign:
         enabled: true
-        scale: 20.0
+        scale: 24.0
       PathDist:
         enabled: true
-        scale: 24.0
+        scale: 28.0
       GoalDist:
         enabled: true
         scale: 24.0
@@ -153,14 +153,15 @@ local_costmap:
       width: 3
       height: 3
       resolution: 0.05
-      # 平衡：真车轮外沿≈±0.40；略留余量防蹭墙，但不涂满走廊（乱绕/站死）
-      footprint: "[[0.38, 0.43], [0.38, -0.43], [-0.36, -0.43], [-0.36, 0.43]]"
+      # RViz Color Scheme=Costmap 时：外浅蓝可走、近墙红/紫=危险；inflation 太大两侧会在走廊中间封死
+      footprint: "[[0.40, 0.44], [0.40, -0.44], [-0.38, -0.44], [-0.38, 0.44]]"
       footprint_padding: 0.03
       plugins: ["voxel_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
+        # 外圈浅蓝渐进；别用 0.75 把窄廊涂满
         cost_scaling_factor: 3.0
-        inflation_radius: 0.45
+        inflation_radius: 0.50
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: True
@@ -194,7 +195,7 @@ global_costmap:
       publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_footprint
-      footprint: "[[0.38, 0.43], [0.38, -0.43], [-0.36, -0.43], [-0.36, 0.43]]"
+      footprint: "[[0.40, 0.44], [0.40, -0.44], [-0.38, -0.44], [-0.38, 0.44]]"
       footprint_padding: 0.03
       resolution: 0.05
       track_unknown_space: true
@@ -219,7 +220,7 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.45
+        inflation_radius: 0.50
       always_send_full_costmap: True
 
 map_server:
@@ -327,17 +328,16 @@ collision_monitor:
     source_timeout: 1.0
     base_shift_correction: True
     stop_pub_timeout: 2.0
-    # 不要硬停：硬停会把 cmd_vel 掐死，车像「永远不动」。
-    # 只减速；卡住由 progress_checker → BT recovery（清图/后退/重规划）接手。
-    polygons: ["PolygonSlow"]
-    PolygonSlow:
+    # 近墙爬行减速（非硬停）；已去掉 ArmFrontSlow（转弯易触发反复恢复→定位飘）
+    polygons: ["PolygonCrawl"]
+    PolygonCrawl:
       type: "circle"
-      radius: 0.55
+      radius: 0.40
       action_type: "slowdown"
-      min_points: 4
-      slowdown_ratio: 0.30
+      min_points: 3
+      slowdown_ratio: 0.15
       visualize: True
-      polygon_pub_topic: "polygon_slowdown"
+      polygon_pub_topic: "polygon_crawl"
       enabled: True
     observation_sources: ["scan"]
     scan:
