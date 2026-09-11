@@ -476,7 +476,6 @@ _KNOWN_CUBES = {
     ("blue", 5): (-4.20, -11.14, 0.015),
 }
 
-
 def known_cube_xy(color: str, cube_id: int):
     """Map pose of numbered cube (must match Gazebo world)."""
     key = (color.lower(), int(cube_id))

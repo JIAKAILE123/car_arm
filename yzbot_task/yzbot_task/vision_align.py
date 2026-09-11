@@ -206,7 +206,7 @@ def grasp_box_xyxy(
     image_w: int,
     image_h: int,
     *,
-    lock_v_frac: float = 0.75,
+    lock_v_frac: float = 0.82,
     grasp_box_frac: float = 0.15,
     target_u: float = 0.0,
 ) -> Tuple[float, float, float, float, float, float]:
@@ -237,7 +237,7 @@ def box_fill_ratio(
     image_w: int,
     image_h: int,
     *,
-    lock_v_frac: float = 0.75,
+    lock_v_frac: float = 0.82,
     grasp_box_frac: float = 0.15,
     target_u: float = 0.0,
 ) -> float:
@@ -274,7 +274,7 @@ def cube_fully_in_box(
     image_w: int,
     image_h: int,
     *,
-    lock_v_frac: float = 0.75,
+    lock_v_frac: float = 0.82,
     grasp_box_frac: float = 0.15,
     target_u: float = 0.0,
 ) -> bool:
@@ -298,7 +298,7 @@ def annotate_bgr(
     target_v: float = 0.0,
     label: str = "",
     prefer_uv: Optional[Tuple[float, float]] = None,
-    lock_v_frac: float = 0.75,
+    lock_v_frac: float = 0.82,
     grasp_box_frac: float = 0.15,
     draw_grasp_box: bool = True,
 ) -> np.ndarray:

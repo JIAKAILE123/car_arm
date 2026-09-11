@@ -1986,7 +1986,7 @@
       <pose>-6.89 -2.8 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>1.0</mass>
+          <mass>5.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2007,13 +2007,18 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.01</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
                 <mu>100</mu>
@@ -2045,7 +2050,7 @@
       <pose>-2.89 -5.85 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>1.0</mass>
+          <mass>5.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2066,13 +2071,18 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.01</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
                 <mu>100</mu>
@@ -2104,7 +2114,7 @@
       <pose>-2.02 -4.50 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>1.0</mass>
+          <mass>5.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2125,13 +2135,18 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.01</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
                 <mu>100</mu>
@@ -2163,7 +2178,7 @@
       <pose>-2.77 5.8 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>1.0</mass>
+          <mass>5.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2184,13 +2199,18 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.01</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
                 <mu>100</mu>
@@ -2222,7 +2242,7 @@
       <pose>-2.08 3.66 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>1.0</mass>
+          <mass>5.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2243,13 +2263,18 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.01</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
                 <mu>100</mu>
@@ -2281,7 +2306,7 @@
       <pose>-6.18 -2.20 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>1.0</mass>
+          <mass>5.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2302,13 +2327,18 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.01</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
                 <mu>100</mu>
@@ -2340,7 +2370,7 @@
       <pose>-8.21 -5.21 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>1.0</mass>
+          <mass>5.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2361,13 +2391,18 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.01</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
                 <mu>100</mu>
@@ -2399,7 +2434,7 @@
       <pose>-8.08 2.35 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>1.0</mass>
+          <mass>5.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2420,13 +2455,18 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.01</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
                 <mu>100</mu>
@@ -2458,7 +2498,7 @@
       <pose>-5.77 -5.28 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>1.0</mass>
+          <mass>5.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2479,13 +2519,18 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.01</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
                 <mu>100</mu>
@@ -2517,7 +2562,7 @@
       <pose>-4.20 -11.14 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>1.0</mass>
+          <mass>5.0</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2538,13 +2583,18 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.01</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
                 <mu>100</mu>

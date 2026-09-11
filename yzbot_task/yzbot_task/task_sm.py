@@ -87,9 +87,9 @@ class TaskStateMachine(Node):
         self.declare_parameter("allow_known_map", True)
         self.declare_parameter("use_cube_standoff", True)
 
-        self.declare_parameter("grasp_standoff_m", 0.26)
+        self.declare_parameter("grasp_standoff_m", 0.23)
 
-        self.declare_parameter("grasp_standoff_retry_m", 0.28)
+        self.declare_parameter("grasp_standoff_retry_m", 0.25)
         self.declare_parameter("lock_min_area", 60.0)
         self.declare_parameter("lock_max_err_u", 0.10)
         self.declare_parameter("lock_timeout", 14.0)
@@ -102,12 +102,12 @@ class TaskStateMachine(Node):
         self.declare_parameter("stable_hold_sec", 0.40)
         self.declare_parameter("preset_r_slack", 0.15)
         # Fixed pick visual gate: whole cube inside large square + pixel range
-        self.declare_parameter("lock_v_frac", 0.75)
+        self.declare_parameter("lock_v_frac", 0.82)
         self.declare_parameter("grasp_box_frac", 0.15)
         self.declare_parameter("target_area_frac", 0.028)
         self.declare_parameter("area_frac_tol", 0.012)
-        self.declare_parameter("target_fill", 0.90)
-        self.declare_parameter("fill_tol", 0.14)
+        self.declare_parameter("target_fill", 0.93)
+        self.declare_parameter("fill_tol", 0.12)
         self.declare_parameter("cube_width_m", 0.03)
 
         self.poses = _load_poses()
@@ -591,12 +591,6 @@ class TaskStateMachine(Node):
             self.get_logger().warn(f"pre-detach ignored: {exc}")
         time.sleep(0.2)
 
-        mx, my, mz = known_cube_xy(color, cid)
-        if self.motion.snap_cube_fixed(color, cid):
-            self._pub_status(
-                f"CUBE_FIXED {color}_cube_{cid} @ map=({mx:.2f},{my:.2f},{mz:.2f})"
-            )
-
         # 假吸附不需要夹爪动作：禁止开合，避免「举着先夹一下」
         self._pub_status("GRIPPER_SKIP (LinkAttacher，不发夹爪轨迹)")
 
@@ -644,7 +638,7 @@ class TaskStateMachine(Node):
         return True
 
     def _place_with_moveit(self, color: str, cid: int) -> bool:
-        """到放置区：预设放置姿态 → Detach。"""
+        """到放置区：预设放置姿态 → Detach → 收臂（不做瞬移/冻结/回货架）。"""
         import subprocess
         import os
 
@@ -825,25 +819,21 @@ class TaskStateMachine(Node):
                 return
 
             if not skip_nav:
-                self._pub_status(f"NAV_START → place zone {zone}")
+                self._pub_status(
+                    f"NAV_PLACE → zone {zone} center (XY到位即放，不拧头)"
+                )
                 self.motion.prepare_next_nav()
-                if not self.motion.navigate_and_verify(
-                    zx,
-                    zy,
-                    zyaw,
-                    retries=3,
-                    xy_tol=0.45,
-                    yaw_tol=0.50,
-                    settle_sec=2.0,
-                ):
+                if not self.motion.navigate_place_zone(zx, zy, xy_tol=0.45):
                     self._pub_status(f"NAV_PLACE_FAIL {zone}")
                     return
 
             if not self._place_with_moveit(color, cid):
                 return
             self._pub_status(f"PLACED {color}_{cid} at {zone}")
-            # Place done — pin zone pose so next pick-nav does not start skewed
-            self.motion.prepare_next_nav(zx, zy, zyaw)
+            # Place done — pin zone XY; keep actual yaw (avoid forced spin seed)
+            cur = self.motion.get_base_xy_yaw_map()
+            pyaw = float(cur[2]) if cur is not None else zyaw
+            self.motion.prepare_next_nav(zx, zy, pyaw)
 
         self._pub_status("DONE")
 

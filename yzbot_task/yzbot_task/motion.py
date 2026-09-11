@@ -238,7 +238,15 @@ class MotionHelpers:
             time.sleep(0.05)
         return True
 
-    def navigate(self, x: float, y: float, yaw: float, timeout: float = 180.0) -> bool:
+    def navigate(
+        self,
+        x: float,
+        y: float,
+        yaw: float,
+        timeout: float = 180.0,
+        *,
+        early_xy_tol: Optional[float] = None,
+    ) -> bool:
         if self.drive_owner != "nav":
             self.node.get_logger().warn("navigate blocked until MODE_NAV; forcing exit_local")
             self.exit_local_mode()
@@ -261,7 +269,14 @@ class MotionHelpers:
 
         goal = NavigateToPose.Goal()
         goal.pose = pose
-        self.node.get_logger().info(f"NAV → ({x:.2f}, {y:.2f}, yaw={yaw:.2f})")
+        early_s = (
+            f" early_xy≤{early_xy_tol:.2f}"
+            if early_xy_tol is not None
+            else ""
+        )
+        self.node.get_logger().info(
+            f"NAV → ({x:.2f}, {y:.2f}, yaw={yaw:.2f}){early_s}"
+        )
         send = self.nav.send_goal_async(goal)
         if not self._spin_until(send, 30.0):
             self.node.get_logger().error("nav send_goal timeout")
@@ -272,19 +287,144 @@ class MotionHelpers:
             return False
         self._nav_goal_handle = goal_handle
         result_fut = goal_handle.get_result_async()
-        if not self._spin_until(result_fut, timeout):
-            self.node.get_logger().error("nav result timeout")
-            self.cancel_nav()
-            return False
+        t0 = time.time()
+        while not result_fut.done():
+            if time.time() - t0 > timeout:
+                self.node.get_logger().error("nav result timeout")
+                self.cancel_nav()
+                return False
+            # Place: XY close enough → cancel RotateToGoal spin, dump now
+            if early_xy_tol is not None:
+                cur = self.get_base_xy_yaw_map()
+                if cur is not None:
+                    dxy = math.hypot(cur[0] - float(x), cur[1] - float(y))
+                    if dxy <= float(early_xy_tol):
+                        self.node.get_logger().info(
+                            f"NAV_EARLY_XY dxy={dxy:.3f}≤{early_xy_tol:.2f} → stop spin, place"
+                        )
+                        self.cancel_nav()
+                        self.stop_chassis()
+                        time.sleep(0.15)
+                        self._nav_goal_handle = None
+                        return True
+            time.sleep(0.08)
         self._nav_goal_handle = None
         from action_msgs.msg import GoalStatus
 
         wrapped = result_fut.result()
         status = int(getattr(wrapped, "status", GoalStatus.STATUS_UNKNOWN))
+        # Early cancel returns CANCELED — still OK if we already accepted above
         if status != GoalStatus.STATUS_SUCCEEDED:
+            # If XY already good after cancel race, treat as success
+            if early_xy_tol is not None:
+                cur = self.get_base_xy_yaw_map()
+                if cur is not None:
+                    dxy = math.hypot(cur[0] - float(x), cur[1] - float(y))
+                    if dxy <= float(early_xy_tol) * 1.25:
+                        self.node.get_logger().info(
+                            f"NAV status={status} but dxy={dxy:.3f} OK for place"
+                        )
+                        return True
             self.node.get_logger().error(f"nav finished status={status} (not SUCCEEDED)")
             return False
         return True
+
+    def navigate_place_zone(
+        self,
+        x: float,
+        y: float,
+        *,
+        xy_tol: float = 0.45,
+        timeout: float = 120.0,
+    ) -> bool:
+        """Fast place approach: go to zone center XY, ignore final yaw spin."""
+        cur = self.get_base_xy_yaw_map()
+        # Goal yaw = current heading → RotateToGoal has nothing to twist for
+        yaw = float(cur[2]) if cur is not None else 0.0
+        self.node.get_logger().info(
+            f"NAV_PLACE zone=({x:.2f},{y:.2f}) keep_yaw={yaw:.2f} "
+            f"(no heading dock)"
+        )
+        # Loosen controller yaw tolerance for this leg (restore after)
+        old_yaw_tol = self._set_follow_yaw_tol(3.0)
+        try:
+            ok = self.navigate(
+                float(x),
+                float(y),
+                yaw,
+                timeout=timeout,
+                early_xy_tol=float(xy_tol),
+            )
+        finally:
+            if old_yaw_tol is not None:
+                self._set_follow_yaw_tol(old_yaw_tol)
+        if not ok:
+            return False
+        time.sleep(0.25)
+        self.stop_chassis()
+        gate_ok, why = self.pose_gate_ok(
+            float(x), float(y), yaw, xy_tol=float(xy_tol), yaw_tol=math.pi
+        )
+        self.node.get_logger().info(why)
+        if not gate_ok:
+            # One soft retry with same keep-yaw policy
+            ok2 = self.navigate(
+                float(x),
+                float(y),
+                yaw,
+                timeout=min(60.0, timeout),
+                early_xy_tol=float(xy_tol) * 1.15,
+            )
+            if not ok2:
+                return False
+            time.sleep(0.2)
+            self.stop_chassis()
+        # Reanchor XY only; keep actual heading (don't force zone yaw=0)
+        cur2 = self.get_base_xy_yaw_map()
+        use_yaw = float(cur2[2]) if cur2 is not None else yaw
+        self.reanchor_amcl(float(x), float(y), use_yaw, settle_sec=0.35)
+        return True
+
+    def _set_follow_yaw_tol(self, value: float) -> Optional[float]:
+        """Set FollowPath.yaw_goal_tolerance; return previous value if known."""
+        from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+        from rcl_interfaces.srv import SetParameters, GetParameters
+
+        try:
+            get_cli = self.node.create_client(
+                GetParameters, "/controller_server/get_parameters"
+            )
+            set_cli = self.node.create_client(
+                SetParameters, "/controller_server/set_parameters"
+            )
+            prev = None
+            if get_cli.wait_for_service(timeout_sec=0.4):
+                greq = GetParameters.Request()
+                greq.names = ["FollowPath.yaw_goal_tolerance"]
+                gfut = get_cli.call_async(greq)
+                if self._spin_until(gfut, 1.0) and gfut.result() is not None:
+                    vals = gfut.result().values
+                    if vals and vals[0].type != ParameterType.PARAMETER_NOT_SET:
+                        prev = float(vals[0].double_value)
+            if not set_cli.wait_for_service(timeout_sec=0.4):
+                return prev
+            preq = SetParameters.Request()
+            p = Parameter()
+            p.name = "FollowPath.yaw_goal_tolerance"
+            p.value = ParameterValue()
+            p.value.type = ParameterType.PARAMETER_DOUBLE
+            p.value.double_value = float(value)
+            preq.parameters = [p]
+            sfut = set_cli.call_async(preq)
+            self._spin_until(sfut, 1.0)
+            self.node.get_logger().info(
+                f"FollowPath.yaw_goal_tolerance → {value:.2f}"
+                + (f" (was {prev:.2f})" if prev is not None else "")
+            )
+            return prev if prev is not None else 0.5
+        except Exception as exc:  # noqa: BLE001
+            self.node.get_logger().warn(f"yaw_tol set skipped: {exc}")
+            return None
 
     def get_base_xy_yaw_map(self) -> Optional[Tuple[float, float, float]]:
         """Return (x, y, yaw) of base in map (prefer base_link, else base_footprint)."""
@@ -637,12 +777,12 @@ class MotionHelpers:
         timeout: float = 22.0,
         stable_hold_sec: float = 0.40,
         min_area: float = 40.0,
-        lock_v_frac: float = 0.75,
+        lock_v_frac: float = 0.82,
         grasp_box_frac: float = 0.15,
         target_area_frac: float = 0.028,
         area_frac_tol: float = 0.012,
-        target_fill: float = 0.90,
-        fill_tol: float = 0.14,
+        target_fill: float = 0.93,
+        fill_tol: float = 0.12,
         cube_width_m: float = 0.03,
         on_frame=None,
     ) -> bool:
@@ -780,7 +920,8 @@ class MotionHelpers:
 
             if err_u is not None:
                 # === Have cube in camera: NEVER fight with TF bearing ===
-                # Soft center: small lateral error → skip yaw, go straight to BOX
+                # Phase 1 CENTER: yaw only until mid-line locked (no forward yet)
+                # Phase 2 BOX: only after mid-line OK — creep for box fill
                 yaw_ok = abs(err_u) <= max(err_ok, 0.14)
                 if not yaw_ok:
                     phase = "CENTER"
@@ -789,37 +930,42 @@ class MotionHelpers:
                     vx = 0.0
                 else:
                     center_streak += 1
-                    phase = "BOX" if center_streak >= 1 else "CENTER"
-                    # No micro-yaw once roughly on centerline (saves the left-twist)
-                    wz = 0.0
-                    # Phase 2: only after centered — approach for box fill
-                    if phase == "BOX" and fill is not None and img_w > 0:
-                        _bx0, _by0, _bx1, _by1, _cx, _cy = grasp_box_xyxy(
-                            img_w,
-                            img_h,
-                            lock_v_frac=lock_v_frac,
-                            grasp_box_frac=grasp_box_frac,
-                        )
-                        box_side = min(_bx1 - _bx0, _by1 - _by0)
-                        y1_img = float(blob.y1) * (
-                            float(img_h) / max(float(blob.image_h), 1.0)
-                        )
-                        if max(bw, bh) > 1.05 * box_side:
-                            vx = -min(max_vx, 0.08)
-                        elif y1_img > 0.92 * float(img_h):
-                            vx = -min(max_vx, 0.05)
-                        else:
-                            df = float(target_fill) - float(fill)
-                            vx = float(max(-max_vx, min(max_vx, 1.1 * df)))
-                            if rng_vis is not None:
-                                dr = float(rng_vis) - float(target_r)
-                                vx_r = float(
-                                    max(-max_vx, min(max_vx, vx_gain * dr))
-                                )
-                                vx = 0.40 * vx + 0.60 * vx_r
-                            # Keep creeping forward until nearly fill target
-                            if fill < 0.85 and vx < 0.05:
-                                vx = max(vx, 0.06)
+                    # Hold mid-line a few frames before switching to box approach
+                    if center_streak < 3:
+                        phase = "CENTER"
+                        wz = 0.0
+                        vx = 0.0
+                    else:
+                        phase = "BOX"
+                        # No micro-yaw once roughly on centerline
+                        wz = 0.0
+                        if fill is not None and img_w > 0:
+                            _bx0, _by0, _bx1, _by1, _cx, _cy = grasp_box_xyxy(
+                                img_w,
+                                img_h,
+                                lock_v_frac=lock_v_frac,
+                                grasp_box_frac=grasp_box_frac,
+                            )
+                            box_side = min(_bx1 - _bx0, _by1 - _by0)
+                            y1_img = float(blob.y1) * (
+                                float(img_h) / max(float(blob.image_h), 1.0)
+                            )
+                            if max(bw, bh) > 1.05 * box_side:
+                                vx = -min(max_vx, 0.08)
+                            elif y1_img > 0.92 * float(img_h):
+                                vx = -min(max_vx, 0.05)
+                            else:
+                                df = float(target_fill) - float(fill)
+                                vx = float(max(-max_vx, min(max_vx, 1.1 * df)))
+                                if rng_vis is not None:
+                                    dr = float(rng_vis) - float(target_r)
+                                    vx_r = float(
+                                        max(-max_vx, min(max_vx, vx_gain * dr))
+                                    )
+                                    vx = 0.40 * vx + 0.60 * vx_r
+                                # Keep creeping forward until nearly fill target
+                                if fill < 0.88 and vx < 0.05:
+                                    vx = max(vx, 0.06)
             else:
                 # No cube in view: slow twist toward known map coordinates only
                 phase = "SEEK"
@@ -833,15 +979,18 @@ class MotionHelpers:
                         vx = 0.04
 
             yaw_ok = err_u is not None and abs(err_u) <= max(err_ok, 0.14)
-            # Soft snug: roughly in/near box is enough — don't demand perfect fill
+            # Soft snug: need decent box fill — too low left EE floating above cube
             soft_snug = bool(
                 fill is not None
                 and (
-                    in_box
-                    or float(fill) >= 0.45
+                    (
+                        in_box
+                        and float(fill) >= 0.68
+                    )
+                    or float(fill) >= 0.75
                     or (
                         abs(float(fill) - float(target_fill))
-                        <= float(fill_tol) * 1.5
+                        <= float(fill_tol) * 1.25
                     )
                 )
             )
@@ -1206,14 +1355,16 @@ class MotionHelpers:
         )
 
     def arm_place_pose(self) -> bool:
-        """Lower a bit before detach at place zone."""
+        """Lower toward ground before detach at place zone."""
         self.node.get_logger().info("ARM place pose")
         return self._send_traj(
             self.arm,
             ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
             [
                 ([0.0, 0.25, 0.7, 0.0, -0.6, 0.0], 0, 500),
-                ([0.0, 0.7, 1.0, 0.0, -0.4, 0.0], 3, 0),
+                ([0.0, 0.7, 1.0, 0.0, -0.4, 0.0], 2.5, 0),
+                # lower a bit more so detach impulse is smaller
+                ([0.0, 0.95, 1.15, 0.0, -0.55, 0.0], 4.5, 0),
             ],
         )
 
@@ -1280,76 +1431,6 @@ class MotionHelpers:
             [([0.05, 0.05], 0, 200000000), ([0.0, 0.0], 1, 0)],
             timeout=15.0,
         )
-
-    def snap_cube_fixed(self, color: str, cube_id: int) -> bool:
-        """Snap numbered cube back to official fixed map pose (does not drift)."""
-        from yzbot_task.vision_pose import known_cube_xy
-
-        import subprocess
-
-        x, y, z = known_cube_xy(color, cube_id)
-        name = f"{color}_cube_{cube_id}"
-        self.node.get_logger().info(
-            f"CUBE_SNAP_FIXED {name} → ({x:.2f},{y:.2f},{z:.2f})"
-        )
-        try:
-            subprocess.run(
-                [
-                    "gz",
-                    "model",
-                    "-m",
-                    name,
-                    "-x",
-                    f"{x:.4f}",
-                    "-y",
-                    f"{y:.4f}",
-                    "-z",
-                    f"{z:.4f}",
-                ],
-                check=False,
-                timeout=5,
-            )
-            return True
-        except Exception as exc:  # noqa: BLE001
-            self.node.get_logger().warn(f"snap_cube_fixed failed: {exc}")
-            return False
-
-    def raise_cube_inplace(self, color: str, cube_id: int, z: float = 0.82) -> bool:
-        """Only bump cube Z at its shelf XY — keep collision, avoid flying to EE."""
-        from yzbot_task.vision_pose import known_cube_xy
-
-        import subprocess
-
-        name = f"{color}_cube_{cube_id}"
-        x, y, _z = known_cube_xy(color, cube_id)
-        self.node.get_logger().info(
-            f"raise {name} inplace → ({x:.2f}, {y:.2f}, {z:.2f})"
-        )
-        try:
-            subprocess.run(
-                [
-                    "gz",
-                    "model",
-                    "-m",
-                    name,
-                    "-x",
-                    f"{x:.4f}",
-                    "-y",
-                    f"{y:.4f}",
-                    "-z",
-                    f"{z:.4f}",
-                ],
-                check=False,
-                timeout=5,
-            )
-            return True
-        except Exception as exc:  # noqa: BLE001
-            self.node.get_logger().warn(f"raise cube failed: {exc}")
-            return False
-
-    def snap_cube_near_ee(self, color: str, cube_id: int) -> bool:
-        """Deprecated: caused cubes to 'fly' to the arm. Use raise_cube_inplace."""
-        return self.raise_cube_inplace(color, cube_id)
 
     def attach(self, color: str, cube_id: int) -> bool:
         req = AttachLink.Request()
