@@ -742,13 +742,13 @@ class MotionHelpers:
         self.stop_chassis()
         self.exit_local_mode()
         if x is not None and y is not None and yaw is not None:
-            self.reanchor_amcl(float(x), float(y), float(yaw), settle_sec=0.7)
+            self.reanchor_amcl(float(x), float(y), float(yaw), settle_sec=0.45)
         else:
-            time.sleep(0.4)
+            time.sleep(0.25)
         # After placing a cube, do NOT clear — keep laser marks so we don't plan over it
         if clear_maps:
             self.clear_costmaps()
-        time.sleep(0.3)
+        time.sleep(0.20)
 
     def stop_chassis(self, n: int = 5) -> None:
         tw = Twist()
@@ -1017,9 +1017,9 @@ class MotionHelpers:
         cube_id: int,
         *,
         target_range: float = 0.42,
-        max_vx: float = 0.12,
+        max_vx: float = 0.14,
         max_wz: float = 0.22,
-        timeout: float = 14.0,
+        timeout: float = 12.0,
     ) -> bool:
         """Face known cube map XY, then drive forward until range ≤ target_range.
 

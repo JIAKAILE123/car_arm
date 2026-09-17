@@ -538,7 +538,7 @@ class TaskStateMachine(Node):
                 retries=retries,
                 xy_tol=xy_tol,
                 yaw_tol=yaw_tol,
-                settle_sec=0.35,
+                settle_sec=0.25,
                 reanchor=True,
             )
             if not nav_ok:
@@ -1083,8 +1083,8 @@ class TaskStateMachine(Node):
         else:
             self._pub_status("MTC_LIFT_OK")
         self.motion.stop_chassis()
-        # 等臂收稳再导航出门，避免中间墙刮臂
-        time.sleep(2.0)
+        # 等臂收稳再导航出门，避免中间墙刮臂（原 2.0s，略收）
+        time.sleep(1.5)
         return True
 
     def _place_with_moveit(self, color: str, cid: int) -> bool:
@@ -1248,7 +1248,7 @@ class TaskStateMachine(Node):
                         color,
                         cid,
                         target_range=reach_r,
-                        max_vx=0.14,
+                        max_vx=0.16,
                         max_wz=0.20,
                         timeout=8.0,
                     )
@@ -1304,7 +1304,7 @@ class TaskStateMachine(Node):
                         max_wz=min(
                             0.16, float(self.get_parameter("align_max_wz").value)
                         ),
-                        max_vx=0.12,
+                        max_vx=0.14,
                         timeout=16.0,
                         stable_hold_sec=0.25,
                         lock_v_frac=float(self.get_parameter("lock_v_frac").value),
@@ -1342,7 +1342,7 @@ class TaskStateMachine(Node):
                             ),
                             min_fill=1.20,
                             min_cy_frac=0.72,
-                            max_vx=0.09,
+                            max_vx=0.10,
                             timeout=8.0,
                             max_travel_m=0.28,
                         )
@@ -1572,8 +1572,8 @@ class TaskStateMachine(Node):
         )
         self.motion.enter_local_mode(settle_sec=min(0.20, settle))
         try:
-            # 1) Always reverse straight first — cubes are under/near bumper
-            self.motion.drive_openloop_distance(-0.85, vx=0.14, timeout=10.0)
+            # Same path as before; vx 0.14→0.18 only (distance unchanged)
+            self.motion.drive_openloop_distance(-0.85, vx=0.18, timeout=10.0)
             time.sleep(0.15)
             cur2 = self.motion.get_base_xy_yaw_map()
             if cur2 is not None:
@@ -1603,10 +1603,10 @@ class TaskStateMachine(Node):
             if need > 0.20:
                 # Drive mostly straight toward leave; if still skewed, reverse more
                 if abs(rem) > 1.0 and dist1 < 0.55:
-                    self.motion.drive_openloop_distance(-0.50, vx=0.12, timeout=6.0)
+                    self.motion.drive_openloop_distance(-0.50, vx=0.16, timeout=6.0)
                 else:
                     self.motion.drive_openloop_distance(
-                        min(need, 1.10), vx=0.14, timeout=12.0
+                        min(need, 1.10), vx=0.18, timeout=12.0
                     )
         finally:
             self.motion.stop_chassis()
