@@ -51,10 +51,8 @@ LOOK_SWEEP = [
     survey_joints(0.0),
 ]
 PREGRASP = survey_joints(0.0)
-# Floor cubes z≈0.015 — raise only a little above original [1.2, 1.17, -0.3]
-# so EE clears the floor without missing attach height.
-# Slightly above hard floor contact; j2/j3 must be >1.0 (ros2_control was wrongly ±1)
-PICK = [0.0, 1.20, 1.17, 0.0, -0.30, 0.0]
+# Floor cubes z≈0.015. 预设下探姿态（可按实机微调 j2/j3）。
+PICK = [0.0, 1.20, 1.12, 0.0, -0.30, 0.0]
 PRESET_REACH_R = 0.36
 CARRY = [0.0, 0.25, 0.7, 0.0, -0.6, 0.0]
 PLACE = [0.0, 0.7, 1.0, 0.0, -0.4, 0.0]

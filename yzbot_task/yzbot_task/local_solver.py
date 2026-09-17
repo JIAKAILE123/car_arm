@@ -30,26 +30,27 @@ def solve_xy_from_question(question: str) -> Tuple[int, int]:
     type1 = 0
     type2 = 0
 
-    # 「小帅、小丽都需要7件T恤」→ subjects * N
-    for m in re.finditer(r"([\u4e00-\u9fff、]{2,}?)都需要(\d+)件T恤", text):
+    # 「小帅、小丽都需要7件T恤」/「都领养2只猫」→ subjects * N
+    # names may include ASCII (小A) in practice banks
+    _name = r"([\u4e00-\u9fffA-Za-z0-9、]{2,}?)"
+    for m in re.finditer(_name + r"都(?:需要|领养)(\d+)件T恤", text):
         subjects = [s for s in m.group(1).split("、") if s]
         type1 += int(m.group(2)) * max(len(subjects), 1)
-    for m in re.finditer(r"([\u4e00-\u9fff、]{2,}?)都需要(\d+)条裤子", text):
+    for m in re.finditer(_name + r"都(?:需要|领养)(\d+)条裤子", text):
         subjects = [s for s in m.group(1).split("、") if s]
         type2 += int(m.group(2)) * max(len(subjects), 1)
-    for m in re.finditer(r"([\u4e00-\u9fff、]{2,}?)都需要(\d+)只?猫", text):
+    for m in re.finditer(_name + r"都(?:需要|领养)(\d+)只?猫", text):
         subjects = [s for s in m.group(1).split("、") if s]
         type1 += int(m.group(2)) * max(len(subjects), 1)
-    for m in re.finditer(r"([\u4e00-\u9fff、]{2,}?)都需要(\d+)只?狗", text):
+    for m in re.finditer(_name + r"都(?:需要|领养)(\d+)只?狗", text):
         subjects = [s for s in m.group(1).split("、") if s]
         type2 += int(m.group(2)) * max(len(subjects), 1)
 
-    # Strip dou-xu yao clauses so they are not double-counted below
-    text2 = re.sub(r"[\u4e00-\u9fff、]{2,}?都需要\d+件T恤", "", text)
-    text2 = re.sub(r"[\u4e00-\u9fff、]{2,}?都需要\d+条裤子", "", text2)
-    text2 = re.sub(r"[\u4e00-\u9fff、]{2,}?都需要\d+只?猫", "", text2)
-    text2 = re.sub(r"[\u4e00-\u9fff、]{2,}?都需要\d+只?狗", "", text2)
-
+    # Strip dou-* clauses so they are not double-counted below
+    text2 = re.sub(_name + r"都(?:需要|领养)\d+件T恤", "", text)
+    text2 = re.sub(_name + r"都(?:需要|领养)\d+条裤子", "", text2)
+    text2 = re.sub(_name + r"都(?:需要|领养)\d+只?猫", "", text2)
+    text2 = re.sub(_name + r"都(?:需要|领养)\d+只?狗", "", text2)
     for m in re.finditer(r"(\d+)件T恤", text2):
         type1 += int(m.group(1))
     for m in re.finditer(r"(\d+)只?猫", text2):

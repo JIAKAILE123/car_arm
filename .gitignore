@@ -19,3 +19,9 @@ __pycache__/
 *.bag
 *.pgm.bak
 **/COLCON_IGNORE
+
+# API secrets
+.env
+.env.*
+**/deepseek_api_key
+**/secrets/

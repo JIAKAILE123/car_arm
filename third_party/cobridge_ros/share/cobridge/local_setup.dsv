@@ -1,0 +1,3 @@
+source;share/cobridge/environment/ament_prefix_path.sh
+source;share/cobridge/environment/library_path.sh
+source;share/cobridge/environment/path.sh

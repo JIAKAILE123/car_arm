@@ -1,0 +1,4 @@
+source;share/cobridge/local_setup.bash
+source;share/cobridge/local_setup.dsv
+source;share/cobridge/local_setup.sh
+source;share/cobridge/local_setup.zsh
