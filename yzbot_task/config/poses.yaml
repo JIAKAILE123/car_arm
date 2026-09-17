@@ -12,23 +12,25 @@ blue_approach:
   y: 5.50
   yaw: 3.1416
 
-# Place zones: three rooms separated by walls (large open centers)
-# A south hall | B mid open | C west room
+# Place zones: A green | B yellow | C blue (official colors)
+# A south hall | B mid open | C north-ish (after drag layout)
 zone_a:
-  x: 5.4
-  y: -11.8
+  x: 5.40
+  y: -11.80
   yaw: 0.0
 
 zone_b:
-  x: 0.5
-  y: -4.2
+  x: 0.50
+  y: -4.20
   yaw: 0.0
 
 zone_c:
-  x: -8.3
-  y: -6.5
+  x: -0.77
+  y: 2.71
   yaw: 0.0
 
+# Pre-match mapping (example from rules PDF):
+#   x→red, y→blue; count≥threshold → high_zone; else → low_zone
 mapping:
   x_color: red
   y_color: blue

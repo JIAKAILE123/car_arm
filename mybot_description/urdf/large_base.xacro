@@ -4,14 +4,16 @@
     <!-- 大号机器人模型 -->
     <!-- PROPERTY LIST -->
     <xacro:property name="M_PI" value="3.1415926" />
-    <xacro:property name="base_mass" value="2" />
+    <!-- Original lighter chassis (was 28 kg for anti-fly; user testing feel) -->
+    <!-- Heavier again: tip/fly when driving over placed cubes with 2 kg -->
+    <xacro:property name="base_mass" value="18" />
 
     <xacro:property name="base_width" value="0.320" />
     <xacro:property name="base_length" value="0.320" />
     <xacro:property name="base_height" value="0.1" />
 
     <!-- 轮子 -->
-    <xacro:property name="wheel_mass" value="0.4" />
+    <xacro:property name="wheel_mass" value="0.5" />
     <xacro:property name="wheel_radius" value="0.065" />
     <xacro:property name="wheel_length" value="0.050" />
 
@@ -64,9 +66,9 @@
     </xacro:macro>
 
     <!-- Macro for robot 轮子 -->
-    <xacro:macro name="wheel" params="prefix reflect">
+    <xacro:macro name="wheel" params="prefix reflect x:=${wheel_joint_x}">
         <joint name="${prefix}_wheel_joint" type="continuous">
-            <origin xyz="${wheel_joint_x} ${reflect*(base_width+wheel_length)/2} ${-wheel_joint_z}"
+            <origin xyz="${x} ${reflect*(base_width+wheel_length)/2} ${-wheel_joint_z}"
                 rpy="0 0 0" />
             <parent link="base_link" />
             <child link="${prefix}_wheel_link" />
@@ -156,9 +158,9 @@
     </link>
 
 
+    <!-- 2 driven wheels + rear caster only (known-good Gazebo baseline) -->
     <xacro:wheel prefix="left" reflect="1" />
     <xacro:wheel prefix="right" reflect="-1" />
-
     <xacro:caster prefix="back" reflect="-1" />
 
 

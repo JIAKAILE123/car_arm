@@ -28,6 +28,10 @@ setup(
             "cam_fpv = yzbot_task.cam_fpv:main",
             "arm_js_filter = yzbot_task.arm_js_filter:main",
             "dyn_obstacles = yzbot_task.dyn_obstacles:main",
+            "waypoint_probe = yzbot_task.waypoint_probe:main",
+            "costmap_ghost_clear = yzbot_task.costmap_ghost_clear:main",
+            "export_cube_poses = yzbot_task.export_cube_poses:main",
+            "route_planner = yzbot_task.route_planner:main",
         ],
     },
 )

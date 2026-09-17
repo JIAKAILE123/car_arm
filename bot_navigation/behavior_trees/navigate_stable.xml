@@ -1,36 +1,33 @@
 <!--
-  Stop is OK only as a pause while replanning — never freeze forever.
-  - Replan ~1 Hz always
-  - No progress → clear costmaps + backup + spin → retry (many times)
+  Smooth drive: replan 1.2 Hz (slight bump for dyn_obs). Other recovery unchanged.
 -->
 <root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
     <RecoveryNode number_of_retries="12" name="NavigateRecovery">
       <PipelineSequence name="NavigateWithReplanning">
-        <RateController hz="1.0">
+        <RateController hz="1.2">
           <RecoveryNode number_of_retries="2" name="ComputePathToPose">
             <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
             <ClearEntireCostmap name="ClearGlobal" service_name="global_costmap/clear_entirely_global_costmap"/>
           </RecoveryNode>
         </RateController>
 
-        <RecoveryNode number_of_retries="2" name="FollowPath">
+        <RecoveryNode number_of_retries="3" name="FollowPath">
           <FollowPath path="{path}" controller_id="FollowPath"/>
-          <ClearEntireCostmap name="ClearLocal" service_name="local_costmap/clear_entirely_local_costmap"/>
+          <Sequence name="UnstickLocal">
+            <ClearEntireCostmap name="ClearLocal" service_name="local_costmap/clear_entirely_local_costmap"/>
+            <Wait wait_duration="0.4"/>
+          </Sequence>
         </RecoveryNode>
       </PipelineSequence>
 
       <ReactiveFallback name="RecoveryFallback">
         <GoalUpdated/>
         <RoundRobin name="RecoveryActions">
-          <Sequence name="ClearBoth">
-            <ClearEntireCostmap name="ClearLocalRecovery" service_name="local_costmap/clear_entirely_local_costmap"/>
-            <ClearEntireCostmap name="ClearGlobalRecovery" service_name="global_costmap/clear_entirely_global_costmap"/>
-          </Sequence>
-          <BackUp backup_dist="0.35" backup_speed="0.12"/>
-          <Wait wait_duration="0.8"/>
-          <!-- No Spin: in-place spin after place/pick kills AMCL → Nav freezes -->
-          <BackUp backup_dist="0.20" backup_speed="0.10"/>
+          <ClearEntireCostmap name="ClearLocalRecovery" service_name="local_costmap/clear_entirely_local_costmap"/>
+          <Spin spin_dist="0.9"/>
+          <BackUp backup_dist="0.28" backup_speed="0.10"/>
+          <ClearEntireCostmap name="ClearGlobalRecovery" service_name="global_costmap/clear_entirely_global_costmap"/>
           <Wait wait_duration="0.5"/>
         </RoundRobin>
       </ReactiveFallback>

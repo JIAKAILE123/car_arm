@@ -39,7 +39,7 @@
     <xacro:wheel_transmission prefix="right" />
 
 
-    <!-- controller -->
+    <!-- Restored known-good 2-wheel diff drive (matches pre-4WD backup) -->
     <gazebo>
         <plugin name="differential_drive_controller" filename="libgazebo_ros_diff_drive.so">
             <update_rate>30</update_rate>
@@ -47,22 +47,20 @@
             <right_joint>right_wheel_joint</right_joint>
             <wheel_separation>${wheel_joint_y*2}</wheel_separation>
             <wheel_diameter>${2*wheel_radius}</wheel_diameter>
-            <max_wheel_torque>10</max_wheel_torque>
-            <max_wheel_acceleration>1.0</max_wheel_acceleration>
+            <!-- mass≈18 needs more torque than backup's 10 -->
+            <max_wheel_torque>35</max_wheel_torque>
+            <max_wheel_acceleration>1.5</max_wheel_acceleration>
             <command_topic>cmd_vel</command_topic>
             <publish_odom>true</publish_odom>
-            <!-- Only EKF publishes odom→base_footprint TF (avoid dual TF drift). -->
+            <!-- Only EKF publishes odom→base_footprint TF -->
             <publish_odom_tf>false</publish_odom_tf>
-            <publish_wheel_tf>true</publish_wheel_tf>
+            <publish_wheel_tf>false</publish_wheel_tf>
             <odometry_topic>odom</odometry_topic>
             <odometry_frame>odom</odometry_frame>
             <robot_base_frame>base_footprint</robot_base_frame>
             <odometry_source>1</odometry_source>
-	    <!-- 强制 2D 位姿，Z 轴恒为 0 -->
-	    <odometry_2d_only>true</odometry_2d_only>
-	  
-	    <!-- 或者使用下面这个参数（不同版本可能不同） -->
-	    <publish_odom_2d_only>true</publish_odom_2d_only>
+            <odometry_2d_only>true</odometry_2d_only>
+            <publish_odom_2d_only>true</publish_odom_2d_only>
         </plugin>
     </gazebo>
 </robot>

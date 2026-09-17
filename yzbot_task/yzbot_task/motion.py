@@ -13,7 +13,7 @@ from rclpy.node import Node
 from rclpy.duration import Duration
 from tf2_ros import Buffer, TransformListener
 
-from nav2_msgs.action import NavigateToPose
+from nav2_msgs.action import NavigateToPose, NavigateThroughPoses
 from control_msgs.action import FollowJointTrajectory
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from builtin_interfaces.msg import Duration as MsgDuration
@@ -51,10 +51,11 @@ LOOK_SWEEP = [
     survey_joints(0.0),
 ]
 PREGRASP = survey_joints(0.0)
-# Calibrated stand-off for this preset (arm_base forward reach ≈ 0.40 m at j1=0).
-# visual_target_r MUST match PRESET_REACH_R or the fixed arm motion will miss the cube.
-PICK = [0.0, 1.2, 1.17, 0.0, -0.3, 0.0]
-PRESET_REACH_R = 0.40
+# Floor cubes z≈0.015 — raise only a little above original [1.2, 1.17, -0.3]
+# so EE clears the floor without missing attach height.
+# Slightly above hard floor contact; j2/j3 must be >1.0 (ros2_control was wrongly ±1)
+PICK = [0.0, 1.20, 1.17, 0.0, -0.30, 0.0]
+PRESET_REACH_R = 0.36
 CARRY = [0.0, 0.25, 0.7, 0.0, -0.6, 0.0]
 PLACE = [0.0, 0.7, 1.0, 0.0, -0.4, 0.0]
 
@@ -95,6 +96,9 @@ class MotionHelpers:
             Empty, "/global_costmap/clear_entirely_global_costmap"
         )
         self.nav = ActionClient(node, NavigateToPose, "navigate_to_pose")
+        self.nav_through = ActionClient(
+            node, NavigateThroughPoses, "navigate_through_poses"
+        )
         self.arm = ActionClient(
             node, FollowJointTrajectory, "/arm_controller/follow_joint_trajectory"
         )
@@ -203,28 +207,48 @@ class MotionHelpers:
 
     def wait_servers(
         self,
-        timeout: float = 30.0,
+        timeout: float = 8.0,
         *,
         need_arm: bool = True,
         need_attach: bool = True,
     ) -> bool:
+        """Wait for Nav / arm / attach. Keep short — long waits look like 'received but no plan'."""
         ok = True
-        if not self.nav.wait_for_server(timeout_sec=timeout):
+        t_nav = min(float(timeout), 8.0)
+        t_arm = min(float(timeout), 8.0)
+        t_att = min(float(timeout), 5.0)
+
+        self.node.get_logger().info("WAITING_SERVERS: navigate_to_pose …")
+        if not self.nav.wait_for_server(timeout_sec=t_nav):
             self.node.get_logger().error("navigate_to_pose action unavailable — 先开 Nav2")
             ok = False
+        else:
+            self.node.get_logger().info("WAITING_SERVERS: navigate_to_pose OK")
+
+        # Optional: continuous multi-pose nav (door via). Soft-fail if absent.
+        if not self.nav_through.wait_for_server(timeout_sec=min(3.0, t_nav)):
+            self.node.get_logger().warn(
+                "navigate_through_poses unavailable — door via will fall back"
+            )
         if need_arm:
-            if not self.arm.wait_for_server(timeout_sec=timeout):
+            self.node.get_logger().info("WAITING_SERVERS: arm_controller …")
+            if not self.arm.wait_for_server(timeout_sec=t_arm):
                 self.node.get_logger().error("arm_controller action unavailable")
                 ok = False
-            if not self.grip.wait_for_server(timeout_sec=5.0):
+            else:
+                self.node.get_logger().info("WAITING_SERVERS: arm_controller OK")
+            if not self.grip.wait_for_server(timeout_sec=3.0):
                 self.node.get_logger().warn("gripper action unavailable (optional)")
         if need_attach:
-            if not self.attach_cli.wait_for_service(timeout_sec=timeout):
+            self.node.get_logger().info("WAITING_SERVERS: ATTACH/DETACH …")
+            if not self.attach_cli.wait_for_service(timeout_sec=t_att):
                 self.node.get_logger().error("/ATTACHLINK unavailable")
                 ok = False
-            if not self.detach_cli.wait_for_service(timeout_sec=timeout):
+            if not self.detach_cli.wait_for_service(timeout_sec=t_att):
                 self.node.get_logger().error("/DETACHLINK unavailable")
                 ok = False
+            if ok:
+                self.node.get_logger().info("WAITING_SERVERS: attach OK")
         return ok
 
     def _spin_until(self, future, timeout_sec: float) -> bool:
@@ -246,6 +270,7 @@ class MotionHelpers:
         timeout: float = 180.0,
         *,
         early_xy_tol: Optional[float] = None,
+        soft_start: bool = False,
     ) -> bool:
         if self.drive_owner != "nav":
             self.node.get_logger().warn("navigate blocked until MODE_NAV; forcing exit_local")
@@ -253,8 +278,12 @@ class MotionHelpers:
 
         # 取消上一次目标，避免「第二次发目标车不动 / 旧 BT 卡死」
         self.cancel_nav()
-        self.stop_chassis()
-        time.sleep(0.15)
+        if soft_start:
+            # Chain via→final without hard brake (keeps AMCL smoother)
+            time.sleep(0.03)
+        else:
+            self.stop_chassis()
+            time.sleep(0.15)
 
         pose = PoseStamped()
         pose.header.frame_id = "map"
@@ -277,6 +306,12 @@ class MotionHelpers:
         self.node.get_logger().info(
             f"NAV → ({x:.2f}, {y:.2f}, yaw={yaw:.2f}){early_s}"
         )
+        # If localization is dead, Nav2 accepts nothing useful / no path in RViz
+        if self.get_base_xy_yaw_map() is None:
+            self.node.get_logger().error(
+                "NAV abort: no map→base TF (先 2D Pose Estimate)"
+            )
+            return False
         send = self.nav.send_goal_async(goal)
         if not self._spin_until(send, 30.0):
             self.node.get_logger().error("nav send_goal timeout")
@@ -293,18 +328,21 @@ class MotionHelpers:
                 self.node.get_logger().error("nav result timeout")
                 self.cancel_nav()
                 return False
-            # Place: XY close enough → cancel RotateToGoal spin, dump now
+            # Place / via soft-disk: XY close enough → cancel (no yaw spin / no return)
             if early_xy_tol is not None:
                 cur = self.get_base_xy_yaw_map()
                 if cur is not None:
                     dxy = math.hypot(cur[0] - float(x), cur[1] - float(y))
                     if dxy <= float(early_xy_tol):
                         self.node.get_logger().info(
-                            f"NAV_EARLY_XY dxy={dxy:.3f}≤{early_xy_tol:.2f} → stop spin, place"
+                            f"NAV_EARLY_XY dxy={dxy:.3f}≤{early_xy_tol:.2f} → continue"
                         )
                         self.cancel_nav()
-                        self.stop_chassis()
-                        time.sleep(0.15)
+                        if not soft_start:
+                            self.stop_chassis()
+                            time.sleep(0.15)
+                        else:
+                            time.sleep(0.03)
                         self._nav_goal_handle = None
                         return True
             time.sleep(0.08)
@@ -329,6 +367,116 @@ class MotionHelpers:
             return False
         return True
 
+    def _make_pose(self, x: float, y: float, yaw: float) -> PoseStamped:
+        pose = PoseStamped()
+        pose.header.frame_id = "map"
+        pose.header.stamp = self.node.get_clock().now().to_msg()
+        pose.pose.position.x = float(x)
+        pose.pose.position.y = float(y)
+        qx, qy, qz, qw = yaw_to_quat(yaw)
+        pose.pose.orientation.x = qx
+        pose.pose.orientation.y = qy
+        pose.pose.orientation.z = qz
+        pose.pose.orientation.w = qw
+        return pose
+
+    def navigate_through_poses(
+        self,
+        waypoints: list,
+        timeout: float = 180.0,
+        *,
+        early_xy_tol: Optional[float] = None,
+    ) -> bool:
+        """One continuous Nav2 path through waypoints (no stop at intermediates).
+
+        waypoints: list of (x, y, yaw). Final pose is the goal; earlier ones are vias.
+        """
+        if not waypoints:
+            return False
+        if len(waypoints) == 1:
+            x, y, yaw = waypoints[0]
+            return self.navigate(
+                x, y, yaw, timeout=timeout, early_xy_tol=early_xy_tol
+            )
+
+        if self.drive_owner != "nav":
+            self.exit_local_mode()
+
+        if not self.nav_through.server_is_ready():
+            self.node.get_logger().warn(
+                "navigate_through_poses not ready — using last pose only"
+            )
+            x, y, yaw = waypoints[-1]
+            return self.navigate(
+                x, y, yaw, timeout=timeout, early_xy_tol=early_xy_tol
+            )
+
+        self.cancel_nav()
+        # Do NOT long-stop here — keep continuity into the next path
+        time.sleep(0.05)
+
+        goal = NavigateThroughPoses.Goal()
+        goal.poses = [
+            self._make_pose(float(x), float(y), float(yaw)) for x, y, yaw in waypoints
+        ]
+        goal.behavior_tree = ""
+        fx, fy, _ = waypoints[-1]
+        self.node.get_logger().info(
+            "NAV_THROUGH continuous "
+            + " → ".join(f"({x:.2f},{y:.2f})" for x, y, _ in waypoints)
+        )
+        send = self.nav_through.send_goal_async(goal)
+        if not self._spin_until(send, 30.0):
+            self.node.get_logger().error("nav_through send_goal timeout")
+            return False
+        goal_handle = send.result()
+        if not goal_handle.accepted:
+            self.node.get_logger().error("nav_through goal rejected")
+            # Fallback: go to final only
+            x, y, yaw = waypoints[-1]
+            return self.navigate(
+                x, y, yaw, timeout=timeout, early_xy_tol=early_xy_tol
+            )
+        self._nav_goal_handle = goal_handle
+        result_fut = goal_handle.get_result_async()
+        t0 = time.time()
+        while not result_fut.done():
+            if time.time() - t0 > timeout:
+                self.node.get_logger().error("nav_through result timeout")
+                self.cancel_nav()
+                return False
+            if early_xy_tol is not None:
+                cur = self.get_base_xy_yaw_map()
+                if cur is not None:
+                    dxy = math.hypot(cur[0] - float(fx), cur[1] - float(fy))
+                    if dxy <= float(early_xy_tol):
+                        self.node.get_logger().info(
+                            f"NAV_THROUGH_EARLY_XY dxy={dxy:.3f}≤{early_xy_tol:.2f}"
+                        )
+                        self.cancel_nav()
+                        self.stop_chassis()
+                        time.sleep(0.1)
+                        self._nav_goal_handle = None
+                        return True
+            time.sleep(0.08)
+        self._nav_goal_handle = None
+        from action_msgs.msg import GoalStatus
+
+        wrapped = result_fut.result()
+        status = int(getattr(wrapped, "status", GoalStatus.STATUS_UNKNOWN))
+        if status != GoalStatus.STATUS_SUCCEEDED:
+            if early_xy_tol is not None:
+                cur = self.get_base_xy_yaw_map()
+                if cur is not None:
+                    dxy = math.hypot(cur[0] - float(fx), cur[1] - float(fy))
+                    if dxy <= float(early_xy_tol) * 1.25:
+                        return True
+            self.node.get_logger().error(
+                f"nav_through finished status={status} (not SUCCEEDED)"
+            )
+            return False
+        return True
+
     def navigate_place_zone(
         self,
         x: float,
@@ -336,21 +484,36 @@ class MotionHelpers:
         *,
         xy_tol: float = 0.45,
         timeout: float = 120.0,
+        approach_standoff: float = 0.08,
     ) -> bool:
-        """Fast place approach: go to zone center XY, ignore final yaw spin."""
+        """Fast place approach: near zone center XY, ignore final yaw spin.
+
+        Keep a tiny standoff so Nav2 goal is not inside letter collision; arm
+        still drops the cube at the zone middle. After detach, LEAVE_ZONE backs out.
+        """
         cur = self.get_base_xy_yaw_map()
         # Goal yaw = current heading → RotateToGoal has nothing to twist for
         yaw = float(cur[2]) if cur is not None else 0.0
+        gx, gy = float(x), float(y)
+        if cur is not None and float(approach_standoff) > 0.02:
+            dx = gx - float(cur[0])
+            dy = gy - float(cur[1])
+            dist = math.hypot(dx, dy)
+            if dist > float(approach_standoff) + 0.20:
+                ux, uy = dx / dist, dy / dist
+                gx = gx - ux * float(approach_standoff)
+                gy = gy - uy * float(approach_standoff)
         self.node.get_logger().info(
-            f"NAV_PLACE zone=({x:.2f},{y:.2f}) keep_yaw={yaw:.2f} "
-            f"(no heading dock)"
+            f"NAV_PLACE zone=({x:.2f},{y:.2f}) approach=({gx:.2f},{gy:.2f}) "
+            f"standoff={approach_standoff:.2f} keep_yaw={yaw:.2f} "
+            f"(靠近区心放置)"
         )
         # Loosen controller yaw tolerance for this leg (restore after)
         old_yaw_tol = self._set_follow_yaw_tol(3.0)
         try:
             ok = self.navigate(
-                float(x),
-                float(y),
+                float(gx),
+                float(gy),
                 yaw,
                 timeout=timeout,
                 early_xy_tol=float(xy_tol),
@@ -363,14 +526,14 @@ class MotionHelpers:
         time.sleep(0.25)
         self.stop_chassis()
         gate_ok, why = self.pose_gate_ok(
-            float(x), float(y), yaw, xy_tol=float(xy_tol), yaw_tol=math.pi
+            float(gx), float(gy), yaw, xy_tol=float(xy_tol), yaw_tol=math.pi
         )
         self.node.get_logger().info(why)
         if not gate_ok:
             # One soft retry with same keep-yaw policy
             ok2 = self.navigate(
-                float(x),
-                float(y),
+                float(gx),
+                float(gy),
                 yaw,
                 timeout=min(60.0, timeout),
                 early_xy_tol=float(xy_tol) * 1.15,
@@ -379,10 +542,12 @@ class MotionHelpers:
                 return False
             time.sleep(0.2)
             self.stop_chassis()
-        # Reanchor XY only; keep actual heading (don't force zone yaw=0)
+        # Reanchor at approach XY; keep actual heading
         cur2 = self.get_base_xy_yaw_map()
         use_yaw = float(cur2[2]) if cur2 is not None else yaw
-        self.reanchor_amcl(float(x), float(y), use_yaw, settle_sec=0.35)
+        pin_x = float(cur2[0]) if cur2 is not None else float(gx)
+        pin_y = float(cur2[1]) if cur2 is not None else float(gy)
+        self.reanchor_amcl(pin_x, pin_y, use_yaw, settle_sec=0.35)
         return True
 
     def _set_follow_yaw_tol(self, value: float) -> Optional[float]:
@@ -494,14 +659,16 @@ class MotionHelpers:
             if not self.navigate(x, y, yaw, timeout=timeout):
                 self.node.get_logger().error(f"NAV attempt {i + 1}/{attempts} failed")
                 continue
-            time.sleep(max(float(settle_sec), 0.5))
+            time.sleep(max(float(settle_sec), 0.15))
             self.stop_chassis()
             ok, why = self.pose_gate_ok(x, y, yaw, xy_tol=xy_tol, yaw_tol=yaw_tol)
             self.node.get_logger().info(why)
             if ok:
                 if reanchor:
-                    # Pin AMCL to known goal — in-place turns before/after drift it
-                    self.reanchor_amcl(x, y, yaw, settle_sec=0.6)
+                    # Pin AMCL to known goal — short settle (contest time)
+                    self.reanchor_amcl(
+                        x, y, yaw, settle_sec=min(0.25, max(0.1, settle_sec * 0.5))
+                    )
                 return True
             self.node.get_logger().warn(
                 f"PoseGate miss → re-Nav ({i + 1}/{attempts})"
@@ -515,15 +682,18 @@ class MotionHelpers:
         yaw: float,
         *,
         settle_sec: float = 0.8,
-        xy_var: float = 0.12,
-        yaw_var: float = 0.05,
+        xy_var: float = 0.04,
+        yaw_var: float = 0.03,
     ) -> None:
         """Re-seed AMCL at a known map pose (like RViz 2D Pose Estimate).
 
         Call after Nav2 arrives at a verified park/zone, and after local yaw
         align, so the next NavigateToPose does not start from a skewed cloud.
+        Tight covariance + chassis stop first: office walls are ambiguous and
+        a spinning base right after /initialpose pulls the cloud away again.
         """
-        self.stop_chassis()
+        self.stop_chassis(n=8)
+        time.sleep(0.15)
         msg = PoseWithCovarianceStamped()
         msg.header.frame_id = "map"
         msg.header.stamp = self.node.get_clock().now().to_msg()
@@ -538,9 +708,11 @@ class MotionHelpers:
         cov[7] = float(xy_var)
         cov[35] = float(yaw_var)
         msg.pose.covariance = cov
-        for _ in range(3):
+        for _ in range(5):
+            msg.header.stamp = self.node.get_clock().now().to_msg()
             self.initialpose_pub.publish(msg)
-            time.sleep(0.05)
+            time.sleep(0.06)
+        self.stop_chassis(n=4)
         self.node.get_logger().info(
             f"AMCL_REANCHOR ({x:.2f},{y:.2f},yaw={yaw:.2f}) → /initialpose"
         )
@@ -565,6 +737,8 @@ class MotionHelpers:
         x: Optional[float] = None,
         y: Optional[float] = None,
         yaw: Optional[float] = None,
+        *,
+        clear_maps: bool = True,
     ) -> None:
         """Before the next NavigateToPose: stop, optional reanchor, clear costmaps."""
         self.stop_chassis()
@@ -573,7 +747,9 @@ class MotionHelpers:
             self.reanchor_amcl(float(x), float(y), float(yaw), settle_sec=0.7)
         else:
             time.sleep(0.4)
-        self.clear_costmaps()
+        # After placing a cube, do NOT clear — keep laser marks so we don't plan over it
+        if clear_maps:
+            self.clear_costmaps()
         time.sleep(0.3)
 
     def stop_chassis(self, n: int = 5) -> None:
@@ -676,7 +852,7 @@ class MotionHelpers:
         timeout: float = 8.0,
         bearing_fn=None,
     ) -> bool:
-        """Rotate slowly until base +x faces cube. Prefer closed-loop TF bearing_fn."""
+        """Rotate until base +X faces cube. +bearing (left) → +wz (CCW)."""
         if self.drive_owner != "local":
             self.node.get_logger().error("aim_yaw_to_bearing needs MODE_LOCAL")
             return False
@@ -694,11 +870,16 @@ class MotionHelpers:
             if abs(rem) <= tol:
                 self.stop_chassis()
                 self.node.get_logger().info(
-                    f"AIM_MAP_OK rem={rem:+.3f}rad (慢速朝向物块)"
+                    f"AIM_MAP_OK rem={rem:+.3f}rad (base_link +X → 物块)"
                 )
                 return True
-            # Soft proportional + hard cap — protects AMCL
+            # ROS: +wz = CCW = turn left = toward +bearing
             wz = float(max(-max_wz, min(max_wz, yaw_gain * rem)))
+            self.node.get_logger().info(
+                f"AIM_MAP bearing={rem:+.3f} → wz={wz:+.3f} "
+                f"(+bearing=左 → +wz=左转)",
+                throttle_duration_sec=0.4,
+            )
             self.publish_cmd_vel(0.0, wz)
             if bearing_fn is None:
                 rem -= wz * dt
@@ -706,6 +887,283 @@ class MotionHelpers:
         self.stop_chassis()
         self.node.get_logger().error(f"AIM_MAP_FAIL rem={rem:+.3f}")
         return False
+
+    def scan_known_cube_until_seen(
+        self,
+        color: str,
+        cube_id: int,
+        *,
+        max_wz: float = 0.20,
+        timeout: float = 14.0,
+        min_area: float = 35.0,
+        on_frame=None,
+    ) -> bool:
+        """Face known map XY, then ±sweep about that heading until HSV sees the cube.
+
+        Used when the cube is often outside the FOV: we know the coordinates, so
+        scan around atan2(cube−robot) instead of random search.
+        """
+        from yzbot_task.vision_pose import known_cube_xy, cube_bearing_in_base
+
+        if self.drive_owner != "local":
+            self.node.get_logger().error("scan_known_cube_until_seen needs MODE_LOCAL")
+            return False
+
+        try:
+            mx, my, _mz = known_cube_xy(color, cube_id)
+        except Exception as exc:  # noqa: BLE001
+            self.node.get_logger().error(f"SCAN_MAP no cube xy: {exc}")
+            return False
+
+        def _face_rem():
+            cur = self.get_base_xy_yaw_map()
+            if cur is None:
+                return None
+            yd = math.atan2(my - float(cur[1]), mx - float(cur[0]))
+            return float(self._wrap_pi(yd - float(cur[2])))
+
+        def _try_see():
+            bgr = self.grab_front_bgr()
+            if bgr is None:
+                return None, None
+            # Loose gates while scanning into FOV
+            blob = detect_blob(
+                bgr, color, prefer_uv=None, min_cy_frac=0.12
+            )
+            if on_frame is not None:
+                on_frame(bgr, blob, "SCAN_MAP", None, None, None)
+            return bgr, blob
+
+        self.node.get_logger().info(
+            f"SCAN_MAP → {color}_{cube_id} map=({mx:.2f},{my:.2f}) "
+            f"先正对再±扫，直到看见色块"
+        )
+        rem0 = _face_rem()
+        if rem0 is not None and abs(rem0) > 0.10:
+            self.aim_yaw_to_bearing(
+                float(rem0),
+                yaw_gain=0.90,
+                max_wz=float(max_wz),
+                tol=0.10,
+                timeout=min(10.0, abs(rem0) / max(max_wz, 0.08) + 2.0),
+                bearing_fn=_face_rem,
+            )
+            self.stop_chassis()
+            time.sleep(0.15)
+
+        _bgr, blob = _try_see()
+        if blob is not None and float(blob.area) >= min_area:
+            self.node.get_logger().info(
+                f"SCAN_MAP SEE area={blob.area:.0f} (已正对)"
+            )
+            return True
+
+        # Sweep about face heading: 0, +Δ, −Δ, … up to ~±1.1 rad (~63°)
+        offsets = [0.0]
+        for k in (1, 2, 3, 4, 5):
+            d = 0.22 * k
+            offsets.extend([d, -d])
+        last_off = 0.0
+        t0 = time.time()
+        for off in offsets:
+            if time.time() - t0 > timeout:
+                break
+            # Keep face as reference (AMCL may drift); rem_to_face + off
+            rem_face = _face_rem()
+            if rem_face is None:
+                delta = float(off - last_off)
+            else:
+                # Want heading = face + off → rem from current = rem_face + off
+                target_rem = float(rem_face) + float(off)
+                # From last_off relative pose: spin by (off - last_off) approx
+                delta = float(off - last_off)
+                # Prefer absolute correction toward face+off when rem known
+                if abs(target_rem) > abs(delta) + 0.05:
+                    delta = float(self._wrap_pi(target_rem))
+            if abs(delta) > 0.04:
+                self.node.get_logger().info(
+                    f"SCAN_MAP off={off:+.2f} spin={delta:+.3f} "
+                    f"找 {color}_{cube_id}",
+                    throttle_duration_sec=0.2,
+                )
+                self.spin_yaw_openloop(delta, max_wz=max_wz, timeout=4.0)
+                self.stop_chassis()
+                time.sleep(0.20)
+            last_off = float(off)
+            _bgr, blob = _try_see()
+            if blob is not None and float(blob.area) >= min_area:
+                self.node.get_logger().info(
+                    f"SCAN_MAP SEE area={blob.area:.0f} off={off:+.2f}"
+                )
+                return True
+            # Mild creep if roughly facing but still no blob (far / small)
+            info = cube_bearing_in_base(self.tf_buffer, color, cube_id)
+            if info is not None and abs(float(info[0])) < 0.35 and float(info[1]) > 0.55:
+                self.publish_cmd_vel(0.04, 0.0)
+                time.sleep(0.35)
+                self.stop_chassis()
+
+        # Return near face heading
+        rem_back = _face_rem()
+        if rem_back is not None and abs(rem_back) > 0.12:
+            self.spin_yaw_openloop(float(rem_back), max_wz=max_wz, timeout=5.0)
+        self.stop_chassis()
+        self.node.get_logger().warn(
+            f"SCAN_MAP MISS {color}_{cube_id} — 仍无色块，交 OpenCV 再试"
+        )
+        return False
+
+    def creep_to_known_cube(
+        self,
+        color: str,
+        cube_id: int,
+        *,
+        target_range: float = 0.42,
+        max_vx: float = 0.12,
+        max_wz: float = 0.22,
+        timeout: float = 14.0,
+    ) -> bool:
+        """Face known cube map XY, then drive forward until range ≤ target_range.
+
+        Used when Nav2 stops short (inflation / goal checker) ~0.7–1.0 m away.
+        Requires MODE_LOCAL.
+        """
+        from yzbot_task.vision_pose import known_cube_xy
+
+        if self.drive_owner != "local":
+            self.node.get_logger().error("creep_to_known_cube needs MODE_LOCAL")
+            return False
+        try:
+            mx, my, _mz = known_cube_xy(color, cube_id)
+        except Exception as exc:  # noqa: BLE001
+            self.node.get_logger().error(f"CREEP no cube xy: {exc}")
+            return False
+
+        def _rng_yaw():
+            cur = self.get_base_xy_yaw_map()
+            if cur is None:
+                return None, None
+            dx = float(mx) - float(cur[0])
+            dy = float(my) - float(cur[1])
+            rng = math.hypot(dx, dy)
+            des = math.atan2(dy, dx)
+            rem = float(self._wrap_pi(des - float(cur[2])))
+            return rng, rem
+
+        rng0, rem0 = _rng_yaw()
+        if rng0 is None:
+            self.node.get_logger().warn("CREEP skip (no map pose)")
+            return False
+        self.node.get_logger().info(
+            f"CREEP → {color}_{cube_id} r={rng0:.2f}→≤{target_range:.2f}m "
+            f"map=({mx:.2f},{my:.2f})"
+        )
+        if rem0 is not None and abs(rem0) > 0.12:
+            self.aim_yaw_to_bearing(
+                float(rem0),
+                yaw_gain=0.90,
+                max_wz=float(max_wz),
+                tol=0.10,
+                timeout=min(8.0, abs(rem0) / max(max_wz, 0.08) + 1.5),
+                bearing_fn=lambda: (_rng_yaw()[1]),
+            )
+            self.stop_chassis()
+
+        t0 = time.time()
+        dt = 0.08
+        while time.time() - t0 < timeout:
+            rng, rem = _rng_yaw()
+            if rng is None:
+                time.sleep(dt)
+                continue
+            if rng <= float(target_range):
+                self.stop_chassis()
+                self.node.get_logger().info(f"CREEP_OK r={rng:.2f}m")
+                return True
+            wz = 0.0
+            if rem is not None and abs(rem) > 0.08:
+                wz = float(max(-max_wz, min(max_wz, 1.1 * rem)))
+            # Slow when close; keep moving when still far
+            scale = 1.0 if rng > target_range + 0.25 else 0.55
+            vx = float(max_vx * scale)
+            if rem is not None and abs(rem) > 0.55:
+                vx = 0.0  # too skewed — yaw first
+            self.publish_cmd_vel(vx, wz)
+            time.sleep(dt)
+        self.stop_chassis()
+        rng_f, _ = _rng_yaw()
+        self.node.get_logger().warn(
+            f"CREEP_TIMEOUT r={rng_f if rng_f is not None else -1:.2f}m "
+            f"(target≤{target_range:.2f})"
+        )
+        return rng_f is not None and float(rng_f) <= float(target_range) + 0.20
+
+    def spin_yaw_openloop(
+        self,
+        delta_yaw: float,
+        *,
+        max_wz: float = 0.25,
+        timeout: float = 12.0,
+    ) -> bool:
+        """Coordinate-based open-loop spin: turn ≈ delta_yaw rad in place."""
+        if self.drive_owner != "local":
+            self.node.get_logger().error("spin_yaw_openloop needs MODE_LOCAL")
+            return False
+        rem = float(self._wrap_pi(delta_yaw))
+        if abs(rem) < 0.05:
+            return True
+        wz = float(math.copysign(max(0.12, abs(max_wz)), rem))
+        need_t = abs(rem) / max(abs(wz), 0.08)
+        t_lim = min(float(timeout), need_t + 0.4)
+        self.node.get_logger().info(
+            f"SPIN_OPENLOOP delta={rem:+.3f} wz={wz:+.3f} t≈{t_lim:.1f}s"
+        )
+        t0 = time.time()
+        dt = 0.08
+        turned = 0.0
+        while time.time() - t0 < t_lim and abs(turned) < abs(rem) - 0.04:
+            self.publish_cmd_vel(0.0, wz)
+            time.sleep(dt)
+            turned += wz * dt
+        self.stop_chassis()
+        return True
+
+    def drive_openloop_distance(
+        self,
+        distance_m: float,
+        *,
+        vx: float = 0.12,
+        timeout: float = 12.0,
+    ) -> bool:
+        """Straight open-loop drive along current heading (wz=0). MODE_LOCAL.
+
+        distance_m > 0 → forward; < 0 → reverse. No in-place spin — safe near cubes.
+        """
+        if self.drive_owner != "local":
+            self.node.get_logger().error("drive_openloop_distance needs MODE_LOCAL")
+            return False
+        dist = float(distance_m)
+        if abs(dist) < 0.04:
+            return True
+        speed = float(abs(vx))
+        if speed < 0.06:
+            speed = 0.06
+        signed_vx = float(math.copysign(speed, dist))
+        need_t = abs(dist) / speed
+        t_lim = min(float(timeout), need_t + 0.5)
+        self.node.get_logger().info(
+            f"DRIVE_OPENLOOP dist={dist:+.2f}m vx={signed_vx:+.2f} t≈{t_lim:.1f}s "
+            f"(直行，不原地转)"
+        )
+        t0 = time.time()
+        dt = 0.08
+        traveled = 0.0
+        while time.time() - t0 < t_lim and abs(traveled) < abs(dist) - 0.03:
+            self.publish_cmd_vel(signed_vx, 0.0)
+            time.sleep(dt)
+            traveled += signed_vx * dt
+        self.stop_chassis()
+        return True
 
     def project_known_cube_uv(
         self, color: str, cube_id: int
@@ -781,7 +1239,7 @@ class MotionHelpers:
         grasp_box_frac: float = 0.15,
         target_area_frac: float = 0.028,
         area_frac_tol: float = 0.012,
-        target_fill: float = 0.93,
+        target_fill: float = 1.26,
         fill_tol: float = 0.12,
         cube_width_m: float = 0.03,
         on_frame=None,
@@ -841,6 +1299,8 @@ class MotionHelpers:
         stable_t0: Optional[float] = None
         center_streak = 0
         phase = "CENTER"  # CENTER → BOX → LOCK
+        last_rng: Optional[float] = None
+        saw_blob = False
 
         while time.time() - t0 < timeout:
             bgr = self.grab_front_bgr()
@@ -883,6 +1343,9 @@ class MotionHelpers:
                 bearing, rng_tf, _xyz = info
                 bearing = float(bearing)
                 rng_tf = float(rng_tf)
+                last_rng = rng_tf
+            if blob is not None and float(blob.area) >= min_area:
+                saw_blob = True
 
             err_u = None
             fill = None
@@ -914,32 +1377,67 @@ class MotionHelpers:
                 rng_vis = estimate_range_m_pinhole(
                     max(bw, bh), float(fx or 0.0), object_width_m=cube_width_m
                 )
+                if rng_vis is not None:
+                    # Prefer TF range when available; else keep visual estimate
+                    if last_rng is None:
+                        last_rng = float(rng_vis)
 
             wz = 0.0
             vx = 0.0
 
+            # Depth = pixel size (fill = cube bbox / grasp gate).
+            # Floor cubes already sit low in FPV when still far — cy alone ≠ near.
+            # Lock when cube slightly overfills gate (~1.26 = snug/close)
+            fill_gate = max(1.18, float(target_fill) - float(fill_tol))  # ~1.18
+            fill_creep = max(1.08, fill_gate - 0.10)  # CLOSE until near lock
+            fill_now = float(fill) if fill is not None else 0.0
+            fill_low = fill is None or fill_now < fill_creep
+
             if err_u is not None:
-                # === Have cube in camera: NEVER fight with TF bearing ===
-                # Phase 1 CENTER: yaw only until mid-line locked (no forward yet)
-                # Phase 2 BOX: only after mid-line OK — creep for box fill
-                yaw_ok = abs(err_u) <= max(err_ok, 0.14)
+                yaw_ok = abs(err_u) <= max(err_ok, 0.12)
+                rng_now_pre = rng_tf if rng_tf is not None else (
+                    float(rng_vis) if rng_vis is not None else last_rng
+                )
+                cy_frac = float(blob.cy) / float(max(blob.image_h, 1))
+                # Primary: small pixels → CLOSE. TF/cy only as backup.
+                tf_far = rng_now_pre is not None and float(rng_now_pre) > (
+                    float(target_r) + 0.08
+                )
+                need_close = bool(fill_low or tf_far)
+
                 if not yaw_ok:
                     phase = "CENTER"
                     center_streak = 0
                     wz = blob_to_yaw_cmd(blob, gain=yaw_gain, max_wz=max_wz)
-                    vx = 0.0
+                    # Still inch in while turning if pixels are small
+                    vx = min(max_vx, 0.06) if need_close else 0.0
+                elif need_close:
+                    # Straight-on: err_u OK but blob still tiny → drive to grow fill
+                    phase = "CLOSE"
+                    center_streak = 0
+                    wz = blob_to_yaw_cmd(
+                        blob, gain=yaw_gain * 0.20, max_wz=max_wz * 0.30
+                    )
+                    if fill_now < 0.55:
+                        vx = min(max_vx, 0.12)
+                    elif fill_now < 0.85:
+                        vx = min(max_vx, 0.10)
+                    elif fill_now < fill_creep:
+                        vx = min(max_vx, 0.08)
+                    else:
+                        vx = min(max_vx, 0.05)
+                    if tf_far:
+                        vx = max(vx, 0.07)
                 else:
                     center_streak += 1
-                    # Hold mid-line a few frames before switching to box approach
-                    if center_streak < 3:
+                    if center_streak < 2:
                         phase = "CENTER"
                         wz = 0.0
                         vx = 0.0
                     else:
                         phase = "BOX"
-                        # No micro-yaw once roughly on centerline
                         wz = 0.0
-                        if fill is not None and img_w > 0:
+                        if img_w > 0:
                             _bx0, _by0, _bx1, _by1, _cx, _cy = grasp_box_xyxy(
                                 img_w,
                                 img_h,
@@ -950,24 +1448,16 @@ class MotionHelpers:
                             y1_img = float(blob.y1) * (
                                 float(img_h) / max(float(blob.image_h), 1.0)
                             )
-                            if max(bw, bh) > 1.05 * box_side:
-                                vx = -min(max_vx, 0.08)
-                            elif y1_img > 0.92 * float(img_h):
-                                vx = -min(max_vx, 0.05)
+                            if max(bw, bh) > 1.35 * box_side or y1_img > 0.94 * float(
+                                img_h
+                            ):
+                                vx = -min(max_vx, 0.04)
+                            elif fill_now >= fill_gate:
+                                vx = 0.0
                             else:
-                                df = float(target_fill) - float(fill)
-                                vx = float(max(-max_vx, min(max_vx, 1.1 * df)))
-                                if rng_vis is not None:
-                                    dr = float(rng_vis) - float(target_r)
-                                    vx_r = float(
-                                        max(-max_vx, min(max_vx, vx_gain * dr))
-                                    )
-                                    vx = 0.40 * vx + 0.60 * vx_r
-                                # Keep creeping forward until nearly fill target
-                                if fill < 0.88 and vx < 0.05:
-                                    vx = max(vx, 0.06)
+                                # Almost there — creep until fill hits ~1.26
+                                vx = min(max_vx, 0.05)
             else:
-                # No cube in view: slow twist toward known map coordinates only
                 phase = "SEEK"
                 center_streak = 0
                 if bearing is not None and abs(bearing) > 0.08:
@@ -975,34 +1465,41 @@ class MotionHelpers:
                 if rng_tf is not None and (
                     bearing is None or abs(bearing) < 0.30
                 ):
-                    if float(rng_tf) > float(target_r) + 0.10:
-                        vx = 0.04
+                    if float(rng_tf) > float(target_r) + 0.08:
+                        vx = 0.07
+                # No blob: if TF says far, keep inching
+                if fill is None and rng_tf is not None and float(rng_tf) > float(
+                    target_r
+                ):
+                    vx = max(vx, 0.06)
 
             yaw_ok = err_u is not None and abs(err_u) <= max(err_ok, 0.14)
-            # Soft snug: need decent box fill — too low left EE floating above cube
-            soft_snug = bool(
-                fill is not None
-                and (
-                    (
-                        in_box
-                        and float(fill) >= 0.68
-                    )
-                    or float(fill) >= 0.75
-                    or (
-                        abs(float(fill) - float(target_fill))
-                        <= float(fill_tol) * 1.25
-                    )
-                )
+            rng_gate = float(target_r) + 0.08
+            rng_now = rng_tf if rng_tf is not None else (
+                float(rng_vis) if rng_vis is not None else last_rng
             )
-            # Centered + roughly close → OK (preset arm + attach can finish)
+            tf_ok = bool(
+                rng_now is not None and float(rng_now) <= rng_gate
+            )
+            cy_frac = None
+            if blob is not None and blob.image_h > 0:
+                cy_frac = float(blob.cy) / float(blob.image_h)
+            # Lock ONLY when pixels are big enough — never on err_u/cy alone
+            vis_ok = bool(fill is not None and float(fill) >= fill_gate)
+            if vis_ok and yaw_ok:
+                vx = min(0.0, vx) if vx > 0 else vx
+            # Prefer vision fill; TF alone cannot approve pick
+            range_ok = bool(vis_ok and (tf_ok or float(fill) >= fill_gate + 0.05))
+            soft_snug = bool(vis_ok)
             lock_ok = bool(yaw_ok and soft_snug)
 
             self.node.get_logger().info(
                 f"OPENCV_ALIGN[{phase}] vx={vx:+.2f} wz={wz:+.2f} "
                 f"err_u={('n/a' if err_u is None else f'{err_u:+.3f}')} "
-                f"bear={('n/a' if bearing is None else f'{bearing:+.3f}')} "
+                f"cy={('n/a' if cy_frac is None else f'{cy_frac:.2f}')} "
+                f"r={('n/a' if rng_now is None else f'{rng_now:.2f}')} "
                 f"fill={('n/a' if fill is None else f'{fill:.2f}')} "
-                f"in_box={in_box} soft_snug={soft_snug}",
+                f"range_ok={range_ok} soft_snug={soft_snug}",
                 throttle_duration_sec=0.35,
             )
 
@@ -1014,12 +1511,13 @@ class MotionHelpers:
                         stable_t0 = time.time()
                         phase = "LOCK"
                         self.node.get_logger().info(
-                            "OPENCV_ALIGN_OK → hold (中线大致OK，准备下探)"
+                            "OPENCV_ALIGN_OK → hold (中线+距离OK，准备下探)"
                         )
                     elif time.time() - stable_t0 >= max(0.20, stable_hold_sec * 0.6):
                         self.stop_chassis()
                         self.node.get_logger().info(
-                            f"OPENCV_ALIGN_STABLE err_u={err_u} fill={fill} → PICK"
+                            f"OPENCV_ALIGN_STABLE err_u={err_u} fill={fill} "
+                            f"r={rng_now} → PICK"
                         )
                         return True
             else:
@@ -1029,11 +1527,180 @@ class MotionHelpers:
             time.sleep(0.08)
 
         self.stop_chassis()
-        # Soft timeout: if we saw the cube at all, still allow pick (task_sm continues)
-        self.node.get_logger().warn(
-            "OPENCV_ALIGN_TIMEOUT → SOFT_OK (仍允许预设臂下探吸附)"
+        # NEVER soft-OK on TF alone — screenshot case: r~0.36 fill~0.37 still far
+        bgr = self.grab_front_bgr()
+        fill_last = None
+        cy_frac = None
+        if bgr is not None and saw_blob:
+            prefer = self.project_known_cube_uv(color, cube_id)
+            blob = detect_blob(
+                bgr,
+                color,
+                target_v=detect_tv,
+                prefer_uv=prefer,
+                prefer_max_dist_frac=0.55,
+                min_cy_frac=0.12,
+            )
+            if blob is None:
+                blob = detect_blob(
+                    bgr, color, target_v=detect_tv, min_cy_frac=0.12
+                )
+            if blob is not None:
+                h, w = bgr.shape[:2]
+                fill_last = box_fill_ratio(
+                    blob,
+                    w,
+                    h,
+                    lock_v_frac=lock_v_frac,
+                    grasp_box_frac=grasp_box_frac,
+                )
+                cy_frac = float(blob.cy) / float(max(blob.image_h, 1))
+        # Soft OK only if pixels are large enough — never cy alone (floor cubes look low when far)
+        vis_close = bool(
+            fill_last is not None and float(fill_last) >= 1.15
         )
-        return True
+        if (
+            last_rng is not None
+            and float(last_rng) <= float(target_r) + 0.05
+            and vis_close
+        ):
+            self.node.get_logger().warn(
+                f"OPENCV_ALIGN_TIMEOUT → SOFT_OK r={last_rng:.2f} "
+                f"fill={fill_last} cy={cy_frac}"
+            )
+            return True
+        self.node.get_logger().error(
+            f"OPENCV_ALIGN_TIMEOUT → FAIL r="
+            f"{'n/a' if last_rng is None else f'{last_rng:.2f}'} "
+            f"fill={fill_last} cy={cy_frac} (像素仍小，禁止下探)"
+        )
+        return False
+
+    def drive_until_visually_near(
+        self,
+        color: str,
+        cube_id: int,
+        *,
+        lock_v_frac: float = 0.82,
+        grasp_box_frac: float = 0.15,
+        min_fill: float = 0.55,
+        min_cy_frac: float = 0.55,
+        max_vx: float = 0.08,
+        timeout: float = 8.0,
+        max_travel_m: float = 0.22,
+    ) -> bool:
+        """Creep until cube looks near — but stop before it leaves the FOV.
+
+        Stop early if cy/fill already OK. If cube is too low / too big / lost
+        after being seen, brake (optionally reverse a bit) so we don't pull it
+        out of the camera.
+        """
+        if self.drive_owner != "local":
+            self.node.get_logger().error("drive_until_visually_near needs MODE_LOCAL")
+            return False
+        detect_tv = 2.0 * float(lock_v_frac) - 1.0
+        t0 = time.time()
+        traveled = 0.0
+        dt = 0.08
+        last_fill = None
+        last_cy = None
+        saw = False
+        while time.time() - t0 < timeout and traveled < max_travel_m:
+            bgr = self.grab_front_bgr()
+            if bgr is None:
+                time.sleep(dt)
+                continue
+            prefer = self.project_known_cube_uv(color, cube_id)
+            blob = detect_blob(
+                bgr,
+                color,
+                target_v=detect_tv,
+                prefer_uv=prefer,
+                prefer_max_dist_frac=0.60,
+                min_cy_frac=0.08,
+            )
+            if blob is None:
+                blob = detect_blob(
+                    bgr, color, target_v=detect_tv, min_cy_frac=0.08
+                )
+            wz = 0.0
+            vx = 0.0
+            if blob is not None:
+                saw = True
+                h, w = bgr.shape[:2]
+                last_fill = box_fill_ratio(
+                    blob,
+                    w,
+                    h,
+                    lock_v_frac=lock_v_frac,
+                    grasp_box_frac=grasp_box_frac,
+                )
+                last_cy = float(blob.cy) / float(max(blob.image_h, 1))
+                y1_frac = float(blob.y1) / float(max(blob.image_h, 1))
+                wz = blob_to_yaw_cmd(blob, gain=0.65, max_wz=0.16)
+
+                # Too close / about to leave FOV → stop (only if already fairly near)
+                if (
+                    float(last_fill) >= 1.32
+                    or (
+                        float(last_fill) >= 1.20
+                        and (float(last_cy) >= 0.84 or y1_frac >= 0.93)
+                    )
+                ):
+                    self.publish_cmd_vel(-0.04, 0.0)
+                    time.sleep(0.20)
+                    self.stop_chassis()
+                    self.node.get_logger().info(
+                        f"VIS_NEAR_HOLD (防出视野) fill={last_fill:.2f} "
+                        f"cy={last_cy:.2f} y1={y1_frac:.2f}"
+                    )
+                    return True
+
+                # Good enough — fill (pixel size) only; cy alone ≠ near
+                if float(last_fill) >= min_fill:
+                    self.stop_chassis()
+                    self.node.get_logger().info(
+                        f"VIS_NEAR_OK fill={last_fill:.2f} cy={last_cy:.2f}"
+                    )
+                    return True
+
+                # Still small pixels → keep driving; speed by fill
+                if float(last_fill) < 0.70:
+                    vx = min(max_vx, 0.10)
+                elif float(last_fill) < 1.00:
+                    vx = min(max_vx, 0.08)
+                else:
+                    vx = min(max_vx, 0.06)
+            else:
+                if saw:
+                    # Had cube, then lost → reverse, don't chase out of FOV
+                    self.publish_cmd_vel(-0.08, 0.0)
+                    time.sleep(0.35)
+                    self.stop_chassis()
+                    self.node.get_logger().warn(
+                        "VIS_NEAR_LOST → 微退停 (避免拉出视野)"
+                    )
+                    return bool(
+                        last_fill is not None and float(last_fill) >= 1.10
+                    )
+                from yzbot_task.vision_pose import cube_bearing_in_base
+
+                info = cube_bearing_in_base(self.tf_buffer, color, cube_id)
+                if info is not None and abs(float(info[0])) > 0.08:
+                    wz = float(max(-0.16, min(0.16, 0.75 * float(info[0]))))
+                vx = 0.05
+            self.publish_cmd_vel(vx, wz)
+            traveled += abs(vx) * dt
+            time.sleep(dt)
+        self.stop_chassis()
+        self.node.get_logger().warn(
+            f"VIS_NEAR_TIMEOUT fill={last_fill} cy={last_cy} "
+            f"travel={traveled:.2f}m"
+        )
+        # Accept only if pixels grew enough — never cy alone
+        return bool(
+            last_fill is not None and float(last_fill) >= max(1.12, min_fill - 0.08)
+        )
 
     def opencv_center_on_cube(self, color: str, **kwargs) -> bool:
         """Yaw-only legacy wrapper → align with cube_id=1 fallback."""
@@ -1320,38 +1987,46 @@ class MotionHelpers:
         )
 
     def arm_pick_pose(self, j1: float = 0.0) -> bool:
-        """Reach-down to PICK. No high PREGRASP hop (looked like raise→clamp→down)."""
+        """Reach to PICK above floor cubes — no grind / jitter into the ground."""
         j1 = float(j1)
         pick = list(PICK)
         pick[0] = j1
-        mid = [j1, 1.05, 1.12, 0.0, -0.3, 0.0]
-        self.node.get_logger().info(f"ARM pick pose j1={j1:.3f} (direct mid→pick)")
-        return self._send_traj(
+        self.node.get_logger().info(
+            f"ARM pick pose j1={j1:.3f} q={['%.2f' % x for x in pick]} "
+            f"(抬高防顶地抖动)"
+        )
+        ok = self._send_traj(
             self.arm,
             ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
             [
-                (mid, 0, 500),
-                (pick, 3, 0),
+                ([j1, 0.55, 0.85, 0.0, -0.45, 0.0], 1.2, 0),
+                (pick, 3.5, 0),
             ],
+            timeout=12.0,
         )
+        if not ok:
+            # Collision/timeout: stop fighting the floor, still allow attach attempt
+            self.node.get_logger().warn(
+                "ARM pick traj incomplete (可能曾顶地) → 停止硬顶，继续吸附"
+            )
+            self.stop_chassis()
+            # Soft-OK: LinkAttacher 不依赖贴地；避免 12s 空抖
+            return True
+        return True
 
     def arm_carry_pose(self, j1: float = 0.0) -> bool:
-        """Fold arm tight over base while driving (exit corridors / middle walls).
-
-        Prior end still stuck forward → scraped walls on place-nav after pick.
-        Final pose keeps EE near base so 2D footprint better matches reality.
-        """
+        """Tuck after attach: keep j1=0, no lateral mid pose at pick height."""
         j1 = float(j1)
-        self.node.get_logger().info("ARM carry pose (tucked tight)")
+        self.node.get_logger().info("ARM carry pose (直收，无侧向预摆)")
         return self._send_traj(
             self.arm,
             ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
             [
-                ([j1, 1.15, 1.15, 0.0, -0.4, 0.0], 0, 400),
-                ([0.0, 0.35, 1.10, 0.0, -0.95, 0.0], 2.0, 0),
-                # 收得更靠车体，减少过中间墙时臂尖/夹爪刮墙
-                ([0.0, 0.08, 1.35, 0.0, -1.25, 0.0], 4.0, 0),
+                # Quick lift off floor, then tuck (keep j1)
+                ([j1, 0.85, 1.15, 0.0, -0.55, 0.0], 1.0, 0),
+                ([0.0, 0.08, 1.35, 0.0, -1.25, 0.0], 2.8, 0),
             ],
+            timeout=10.0,
         )
 
     def arm_place_pose(self) -> bool:

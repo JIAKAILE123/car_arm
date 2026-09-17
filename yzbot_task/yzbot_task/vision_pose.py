@@ -361,36 +361,65 @@ def approach_xy_for_cube(
     *,
     standoff_m: float = 0.35,
     robot_xy: Optional[Tuple[float, float]] = None,
+    robot_yaw: Optional[float] = None,
 ) -> Tuple[float, float, float]:
-    """Park axis-aligned so robot base_X is parallel to map axis toward cube.
+    """Park axis-aligned with base +X facing the cube (camera must see it).
 
-    Prefer SAME map-Y (±x standoff, yaw 0/π) → base_X // map_X (your request).
-    Fall back to same map-X only if robot is clearly much closer on N/S side.
+    Blue#2: EAST of cube (map x > cube x) — stand on +X side.
+    Other blue: WEST of cube (map x < cube x).
+    Red: prefer same-Y (±x); N/S only if clearly nearer.
+    Yaw is always atan2(cube − park) so the front camera looks at the cube.
     """
     cx, cy, _z = known_cube_xy(color, cube_id)
     so = float(standoff_m)
+
+    def _face(ax: float, ay: float) -> float:
+        return float(np.arctan2(cy - ay, cx - ax))
+
+    if str(color).lower() == "blue":
+        # blue#2: park on +X (east), farther standoff so path does not skim the cube
+        if int(cube_id) == 2:
+            so2 = max(so, 0.40)
+            ax, ay = float(cx + so2), float(cy)
+        else:
+            ax, ay = float(cx - so), float(cy)
+        return ax, ay, _face(ax, ay)
+
     same_y = [
-        (cx + so, cy, float(np.pi)),  # east, face −x
-        (cx - so, cy, 0.0),  # west, face +x
+        (cx + so, cy),  # east
+        (cx - so, cy),  # west
     ]
     same_x = [
-        (cx, cy + so, float(-np.pi / 2.0)),  # north, face −y
-        (cx, cy - so, float(np.pi / 2.0)),  # south, face +y
+        (cx, cy + so),  # north
+        (cx, cy - so),  # south
     ]
     if robot_xy is None:
-        return same_y[0]
+        ax, ay = same_y[0]
+        return float(ax), float(ay), _face(ax, ay)
 
     rx, ry = float(robot_xy[0]), float(robot_xy[1])
 
     def _d2(p):
         return (p[0] - rx) ** 2 + (p[1] - ry) ** 2
 
-    best_y = min(same_y, key=_d2)
-    best_x = min(same_x, key=_d2)
-    # Prefer same-Y unless N/S park is clearly nearer (~0.45² ratio)
+    def _score(p):
+        # Prefer nearby park; also prefer heading already close to face-cube yaw
+        # so Nav2 does not stop with travel-direction yaw and miss the cube.
+        ax, ay = p
+        face = _face(ax, ay)
+        dist = _d2(p)
+        if robot_yaw is None:
+            return dist
+        dyaw = abs(float(np.arctan2(np.sin(face - robot_yaw), np.cos(face - robot_yaw))))
+        return dist + (0.55 * dyaw) ** 2  # ~0.55m equiv per radian
+
+    best_y = min(same_y, key=_score)
+    best_x = min(same_x, key=_score)
     if _d2(best_x) < _d2(best_y) * 0.45:
-        return float(best_x[0]), float(best_x[1]), float(best_x[2])
-    return float(best_y[0]), float(best_y[1]), float(best_y[2])
+        ax, ay = best_x
+    else:
+        ax, ay = best_y
+    return float(ax), float(ay), _face(ax, ay)
 
 
 def diagnose_est_vs_known(
@@ -461,19 +490,19 @@ def ee_to_pose_distance_m(tf_buffer: Buffer, pose_arm: PoseStamped) -> Optional[
     return float(np.sqrt(dx * dx + dy * dy + dz * dz))
 
 
-# Scattered XY; Z on floor. Park = axis-aligned (same x or same y) + face cube.
-# Park uses approach_xy_for_cube → ±x/±y standoff, yaw ∈ {0,±π/2,π}.
+# Layout from Gazebo export (export_cube_poses apply:=true).
+# Pairwise spacing should stay ≥2m for competition.
 _KNOWN_CUBES = {
     ("red", 1): (-6.89, -2.80, 0.015),
-    ("red", 2): (-2.89, -5.85, 0.015),
-    ("red", 3): (-2.02, -4.50, 0.015),
+    ("red", 2): (-2.00, -5.85, 0.015),
+    ("red", 3): (4.24, -10.28, 0.015),
     ("red", 4): (-2.77, 5.80, 0.015),
-    ("red", 5): (-2.08, 3.66, 0.015),
-    ("blue", 1): (-6.18, -2.20, 0.015),
-    ("blue", 2): (-8.21, -5.21, 0.015),
-    ("blue", 3): (-8.08, 2.35, 0.015),
-    ("blue", 4): (-5.77, -5.28, 0.015),
-    ("blue", 5): (-4.20, -11.14, 0.015),
+    ("red", 5): (1.61, 3.35, 0.015),
+    ("blue", 1): (1.97, -0.24, 0.015),
+    ("blue", 2): (-5.87, -6.68, 0.015),
+    ("blue", 3): (-4.15, 2.35, 0.015),
+    ("blue", 4): (1.82, -5.28, 0.015),
+    ("blue", 5): (-1.78, -11.72, 0.015),
 }
 
 def known_cube_xy(color: str, cube_id: int):
@@ -489,8 +518,8 @@ def cube_bearing_in_base(
 ) -> Optional[Tuple[float, float, Tuple[float, float, float]]]:
     """Map known cube → (bearing_rad, range_xy, map_xyz) in base_link.
 
-    bearing = atan2(y, x): 0 = straight ahead, + = left of robot.
-    Used to AIM chassis toward cube before visual lock (no blind search).
+    bearing = atan2(y, x) in base_link: 0 = ahead (+X), + = left (+Y), − = right.
+    Do NOT clamp x>0 — that flipped the turn when the cube was slightly behind.
     """
     from tf2_geometry_msgs import do_transform_point
 
@@ -509,7 +538,8 @@ def cube_bearing_in_base(
         except Exception:  # noqa: BLE001
             return None
     bx, by = float(p.point.x), float(p.point.y)
-    bearing = float(np.arctan2(by, max(bx, 1e-3)))
+    # Full atan2 — preserves quadrant (behind-left / behind-right)
+    bearing = float(np.arctan2(by, bx))
     rng = float(np.hypot(bx, by))
     return bearing, rng, (x, y, z)
 

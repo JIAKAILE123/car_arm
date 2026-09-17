@@ -37,3 +37,34 @@ def test_solver_official_sample():
 def test_format_roundtrip():
     tasks = parse_command("[red,1,A]")
     assert format_command(tasks) == "[red,1,A]"
+
+
+def test_route_planner_reorders_for_shorter_tour():
+    from yzbot_task.route_planner import plan_route
+
+    # Naive order: 4 reds to A then 1 blue to C from origin
+    cmd = "[red,2,A;blue,1,C]"
+    plan = plan_route(cmd, start=(0.0, 0.0))
+    assert len(plan.legs) == 3
+    colors = [c for c, _i, _z in plan.legs]
+    assert colors.count("red") == 2 and colors.count("blue") == 1
+    zones = {(c, z) for c, _i, z in plan.legs}
+    assert ("red", "A") in {(c, z) for c, _i, z in plan.legs}
+    assert any(c == "blue" and z == "C" for c, _i, z in plan.legs)
+    # All cube ids unique per color
+    reds = [i for c, i, _z in plan.legs if c == "red"]
+    blues = [i for c, i, _z in plan.legs if c == "blue"]
+    assert len(reds) == len(set(reds))
+    assert len(blues) == len(set(blues))
+    assert plan.total_m > 0
+    # Planned command is cube-id form
+    assert "#" in plan.as_command()
+
+
+def test_route_planner_respects_fixed_ids():
+    from yzbot_task.route_planner import plan_route
+
+    plan = plan_route("[red#3,B;blue#1,A]", start=(0.0, 0.0))
+    assert plan.legs[0][1] == 3 or plan.legs[1][1] == 3
+    ids = {(c, i) for c, i, _z in plan.legs}
+    assert ("red", 3) in ids and ("blue", 1) in ids

@@ -336,7 +336,7 @@ def annotate_bgr(
             grasp_box_frac=grasp_box_frac,
             target_u=target_u,
         )
-    snug = in_box and fill >= 0.72
+    snug = in_box and fill >= 0.88
     if draw_grasp_box:
         gate_color = (0, 255, 0) if snug else (0, 165, 255)
         cv2.rectangle(
