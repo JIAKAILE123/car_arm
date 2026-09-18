@@ -3,30 +3,29 @@
 # Cube XY live in vision_pose._KNOWN_CUBES (must match offic_room.world).
 
 red_approach:
-  x: -6.49
-  y: -2.80
+  x: -2.30
+  y: -7.60
   yaw: 3.1416
 
 blue_approach:
-  x: -5.78
-  y: 5.50
+  x: -5.30
+  y: -2.80
   yaw: 3.1416
 
-# Place zones: A green | B yellow | C blue (official colors)
-# A south hall | B mid open | C north-ish (after drag layout)
+# Place zones: A south (raised off wall) | B mid-east | C north
 zone_a:
-  x: 5.40
-  y: -11.80
+  x: -1.00
+  y: -8.10
   yaw: 0.0
 
 zone_b:
-  x: 0.50
-  y: -4.20
+  x: 1.50
+  y: -4.00
   yaw: 0.0
 
 zone_c:
-  x: -0.77
-  y: 2.71
+  x: -0.80
+  y: 0.20
   yaw: 0.0
 
 # Pre-match mapping (example from rules PDF):

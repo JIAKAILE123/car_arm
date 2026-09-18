@@ -61,6 +61,14 @@ def generate_launch_description():
                 'slam': slam,
             }.items(),
         ),
+        # Hard stop before dyn_obs impact (params: collision_monitor in yaml)
+        Node(
+            package='nav2_collision_monitor',
+            executable='collision_monitor',
+            name='collision_monitor',
+            output='screen',
+            parameters=[raw_params, {'use_sim_time': use_sim_time}],
+        ),
         Node(
             package='rviz2',
             executable='rviz2',

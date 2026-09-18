@@ -29,7 +29,14 @@ from cv_bridge import CvBridge
 
 from yzbot_task.command_parser import parse_command, PickTask
 from yzbot_task.route_planner import plan_route
-from yzbot_task.motion import MotionHelpers, CARRY, PLACE, PICK, PRESET_REACH_R
+from yzbot_task.motion import (
+    MotionHelpers,
+    CARRY,
+    PLACE,
+    PICK,
+    PRESET_REACH_R,
+    PLACE_FRONT_M,
+)
 from yzbot_task.vision_align import annotate_bgr, detect_blob, is_visual_lock
 from yzbot_task.vision_pose import (
     EstimateResult,
@@ -88,17 +95,18 @@ class TaskStateMachine(Node):
         self.declare_parameter("grasp_above", 0.05)
         self.declare_parameter("grasp_down", 0.0)
         self.declare_parameter("attach_max_dist", 0.45)
-        # Place: park so ~place_front_m ahead of base_link = zone center (cube on letter)
-        self.declare_parameter("place_front_m", 0.20)
+        # Place: arm drop ≈ PLACE_FRONT_M ahead of base = zone center (no extra bias)
+        self.declare_parameter("place_front_m", float(PLACE_FRONT_M))
+        self.declare_parameter("place_inward_m", 0.0)
         # known_coords = 按官方序号固定坐标：导航到物块前方 → 预设臂 → 吸附
         self.declare_parameter("grasp_mode", "known_coords")
         self.declare_parameter("prefer_joint_pick", True)
         self.declare_parameter("allow_known_map", True)
         self.declare_parameter("use_cube_standoff", True)
-        # Nav park slightly outside inflate; final stop farther for vision room
-        self.declare_parameter("grasp_standoff_m", 0.50)
-        self.declare_parameter("grasp_standoff_retry_m", 0.55)
-        # Final stand-off ≈ preset arm reach — straight-on must close to this before pick
+        # Nav park near cube (camera range); no post-nav blind creep
+        self.declare_parameter("grasp_standoff_m", 0.42)
+        self.declare_parameter("grasp_standoff_retry_m", 0.48)
+        # Fallback only if Nav stops far; normal pick skips creep
         self.declare_parameter("grasp_creep_m", 0.40)
         # Last snap before arm-down — leave a little room so FPV keeps the cube
         self.declare_parameter("pick_final_r", 0.34)
@@ -136,6 +144,8 @@ class TaskStateMachine(Node):
         self.vision_dbg_pub = self.create_publisher(Image, "/yzbot/vision_debug", 10)
         self.busy = False
         self.cube_next = {"red": 1, "blue": 1}
+        # Same letter zone: side-by-side slots so later cubes don't crush earlier ones
+        self._zone_place_count = {"A": 0, "B": 0, "C": 0}
         self.create_timer(2.0, self._maybe_rebind_image, callback_group=self.cb_group)
         self._image_rebound = False
 
@@ -161,6 +171,17 @@ class TaskStateMachine(Node):
             "发任务: ros2 topic pub --once /task_command "
             "std_msgs/msg/String \"{data: '[red,1,A]'}\""
         )
+        # Virtual keepout over A/B/C so Nav2 detours (reconfigured from poses)
+        try:
+            zmap = {}
+            for letter in ("A", "B", "C"):
+                zx, zy, _ = self._pose(f"zone_{letter.lower()}")
+                zmap[letter] = (zx, zy)
+            self.motion.configure_zone_keepouts(
+                zmap, half_x=0.28, half_y=0.14
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warn(f"zone keepout init skipped: {exc}")
 
     def _maybe_rebind_image(self):
         if self._image_rebound or self.busy:
@@ -240,6 +261,32 @@ class TaskStateMachine(Node):
     def _door_via_for_zone(self, zone: str) -> bool:
         """Door vias only for first-red when place zone is A or B (not C)."""
         return str(zone).strip().upper() in ("A", "B")
+
+    def _place_slot_xy(self, zx: float, zy: float, zone: str) -> Tuple[float, float, int]:
+        """Same-zone multi-place: tiny Y offset only (keep drop on letter center)."""
+        zkey = str(zone).strip().upper()
+        n = int(self._zone_place_count.get(zkey, 0))
+        # First cube exact center; later only ±6cm so they don't stack
+        slots_y = (0.0, 0.06, -0.06, 0.10, -0.10)
+        dy = float(slots_y[n % len(slots_y)])
+        return float(zx), float(zy) + dy, n
+
+    def _place_drop_inward(
+        self, tx: float, ty: float, zx: float, zy: float
+    ) -> Tuple[float, float, float]:
+        """Optional inward bias (default 0 — do not drift off the letter)."""
+        inward = float(self.get_parameter("place_inward_m").value)
+        if abs(inward) < 1e-4:
+            cur = self.motion.get_base_xy_yaw_map()
+            rx = float(cur[0]) if cur is not None else float(tx) - 1.0
+            yaw = 0.0 if rx <= float(tx) else math.pi
+            return float(tx), float(ty), yaw
+        cur = self.motion.get_base_xy_yaw_map()
+        rx = float(cur[0]) if cur is not None else float(tx) - 1.0
+        from_west = (rx - (tx - 0.1)) ** 2 <= (rx - (tx + 0.1)) ** 2
+        if from_west:
+            return float(tx) + inward, float(ty), 0.0
+        return float(tx) - inward, float(ty), math.pi
 
     def _door_via_points(self) -> List[Tuple[float, float]]:
         """Fixed mid-path points for red,1 → A/B (no visualization)."""
@@ -350,8 +397,12 @@ class TaskStateMachine(Node):
                 time.sleep(0.05)
 
         if place_mode:
+            front_m = float(self.get_parameter("place_front_m").value)
             ok = self.motion.navigate_place_zone(
-                fx, fy, xy_tol=float(xy_tol or 0.45)
+                fx,
+                fy,
+                xy_tol=float(xy_tol or 0.28),
+                approach_standoff=front_m,
             )
         else:
             ok = self.motion.navigate_and_verify(
@@ -399,31 +450,50 @@ class TaskStateMachine(Node):
             )
         return self._pose(f"{color}_approach")
 
-    def _blue2_east_approach_vias(
+    def _cube_safe_approach_vias(
         self, cx: float, cy: float, park_x: float, park_y: float
     ) -> List[Tuple[float, float]]:
-        """Vias so nav reaches blue#2 from +X without driving over the cube.
+        """Vias so pick never drives across the cube to the park side.
 
-        If the robot is west/near the cube, swing north or south first, then to a
-        staging point east of the cube, then to the park (still east).
+        Handles opposite ±X or ±Y: swing clear, then stage on the park side.
         """
         cur = self.motion.get_base_xy_yaw_map()
-        rx = float(cur[0]) if cur is not None else park_x + 1.0
-        ry = float(cur[1]) if cur is not None else park_y
-        stage_x = max(float(park_x), float(cx) + 0.85)
-        stage = (stage_x, float(cy))
+        rx = float(cur[0]) if cur is not None else float(park_x)
+        ry = float(cur[1]) if cur is not None else float(park_y)
         vias: List[Tuple[float, float]] = []
 
-        # Would a straight path cross the cube? (robot still on −X / over cube)
-        if rx < float(cx) + 0.25:
-            north = (stage_x, float(cy) + 0.95)
-            south = (stage_x, float(cy) - 0.95)
+        opp_x = (float(park_x) - float(cx)) * (rx - float(cx)) < 0.0
+        opp_y = (float(park_y) - float(cy)) * (ry - float(cy)) < 0.0
+        park_east = float(park_x) >= float(cx)
+        park_north = float(park_y) >= float(cy)
+
+        if opp_x:
+            stage_x = float(cx) + (1.00 if park_east else -1.00)
+            north = (stage_x, float(cy) + 1.10)
+            south = (stage_x, float(cy) - 1.10)
             clear = north if abs(ry - north[1]) <= abs(ry - south[1]) else south
             vias.append(clear)
-            vias.append(stage)
-        elif rx < stage_x - 0.25:
-            # Already past cube in x but not yet at staging — go east first
-            vias.append(stage)
+            vias.append((stage_x, float(cy)))
+            return vias
+
+        if opp_y:
+            # e.g. forced north park while robot is south — swing E/W first
+            stage_y = float(cy) + (1.00 if park_north else -1.00)
+            east = (float(cx) + 1.10, stage_y)
+            west = (float(cx) - 1.10, stage_y)
+            clear = east if abs(rx - east[0]) <= abs(rx - west[0]) else west
+            vias.append(clear)
+            vias.append((float(cx), stage_y))
+            return vias
+
+        # Same side but sitting on/near the cube — back out to stage first
+        if math.hypot(rx - float(cx), ry - float(cy)) < 0.70:
+            if abs(float(park_x) - float(cx)) >= abs(float(park_y) - float(cy)):
+                stage_x = float(cx) + (1.00 if park_east else -1.00)
+                vias.append((stage_x, float(cy)))
+            else:
+                stage_y = float(cy) + (1.00 if park_north else -1.00)
+                vias.append((float(cx), stage_y))
         return vias
 
     def _nav_with_vias_then_park(
@@ -496,17 +566,34 @@ class TaskStateMachine(Node):
         xy_tol = float(self.get_parameter("pose_gate_xy").value)
         # Pick: must face cube — loose place yaw (0.75) leaves cam looking away
         yaw_tol = float(self.get_parameter("pose_gate_yaw_pick").value)
-        # vision-v0.5: pick goes straight to park (door vias only on PLACE).
-        # Using door vias on pick left the robot idle at (-3.2,0) far from cube.
-        if str(color).lower() == "blue" and int(cid) == 2:
-            # Never drive west→east over the cube; swing to +X then park
-            vias = self._blue2_east_approach_vias(mx, my, ax, ay)
+        # All blue + all red: never drive across/over the cube (protects AMCL)
+        use_safe = str(color).lower() in ("blue", "red")
+        if use_safe:
+            vias = self._cube_safe_approach_vias(mx, my, ax, ay)
+            if abs(ax - mx) >= abs(ay - my):
+                side = "东" if ax >= mx else "西"
+            else:
+                side = "北" if ay >= my else "南"
             self._pub_status(
-                f"BLUE2_EAST_APPROACH vias={len(vias)} → park +X "
-                f"({ax:.2f},{ay:.2f}) 不压块"
+                f"SAFE_PICK {color}_{cid} park{side} ({ax:.2f},{ay:.2f}) "
+                f"yaw→块={ayaw:.2f} vias={len(vias)} 不压块"
             )
-            nav_ok = self._nav_with_vias_then_park(
-                vias, ax, ay, ayaw, xy_tol=xy_tol, yaw_tol=yaw_tol
+            if vias:
+                nav_ok = self._nav_with_vias_then_park(
+                    vias, ax, ay, ayaw, xy_tol=xy_tol, yaw_tol=yaw_tol
+                )
+            else:
+                self.motion.exit_local_mode()
+                retries = int(self.get_parameter("nav_retries").value)
+                nav_ok = self.motion.navigate_and_verify(
+                    ax,
+                    ay,
+                    ayaw,
+                    retries=retries,
+                    xy_tol=xy_tol,
+                    yaw_tol=yaw_tol,
+                settle_sec=0.18,
+                reanchor=True,
             )
             if not nav_ok:
                 cur = self.motion.get_base_xy_yaw_map()
@@ -524,11 +611,18 @@ class TaskStateMachine(Node):
                 self._pub_status(
                     f"NAV_PICK_SOFT dpark={dpark:.2f}m → 本地按坐标 creep 靠近"
                 )
+                self.motion.clear_costmaps()
+            # Re-anchor at park facing cube — recovers if path brushed obstacles
+            cur2 = self.motion.get_base_xy_yaw_map()
+            if cur2 is not None:
+                self.motion.reanchor_amcl(
+                    float(cur2[0]), float(cur2[1]), float(ayaw), settle_sec=0.12
+                )
         else:
             self.motion.exit_local_mode()
             self._pub_status(
-                f"NAV_PICK_DIRECT → ({ax:.2f},{ay:.2f}) "
-                f"(取块不绕门点，避免停门口)"
+                f"NAV_PICK_DIRECT → ({ax:.2f},{ay:.2f}) yaw={ayaw:.2f} "
+                f"(朝向物块)"
             )
             retries = int(self.get_parameter("nav_retries").value)
             nav_ok = self.motion.navigate_and_verify(
@@ -538,7 +632,7 @@ class TaskStateMachine(Node):
                 retries=retries,
                 xy_tol=xy_tol,
                 yaw_tol=yaw_tol,
-                settle_sec=0.25,
+                settle_sec=0.18,
                 reanchor=True,
             )
             if not nav_ok:
@@ -566,7 +660,8 @@ class TaskStateMachine(Node):
             self._pub_status(f"NAV_PICK_FAIL / TOO_FAR {color}_{cid}")
             return False
         self._pub_status(
-            f"NAV_PICK_OK → 连续本地: 正对+停在~{float(self.get_parameter('grasp_creep_m').value):.2f}m"
+            f"NAV_PICK_OK → 本地: 转向识别+OpenCV贴框 "
+            f"(park≈{float(self.get_parameter('grasp_standoff_m').value):.2f}m)"
         )
         return True
 
@@ -1035,7 +1130,7 @@ class TaskStateMachine(Node):
             self.motion.detach(color, cid)
         except Exception as exc:  # noqa: BLE001
             self.get_logger().warn(f"pre-detach ignored: {exc}")
-        time.sleep(0.2)
+        time.sleep(0.08)
 
         # 假吸附不需要夹爪动作：禁止开合，避免「举着先夹一下」
         self._pub_status("GRIPPER_SKIP (LinkAttacher，不发夹爪轨迹)")
@@ -1049,9 +1144,9 @@ class TaskStateMachine(Node):
             except Exception:  # noqa: BLE001
                 pass
             return False
-        time.sleep(0.25)
+        time.sleep(0.10)
 
-        # 臂到位后再吸附（cube_control / ATTACHLINK）
+        # 臂到位后再吸附（失败也继续抬臂去放置区）
         script = os.path.join(
             os.path.expanduser("~/dev_ws/yzbot/src"), "cube_control.sh"
         )
@@ -1062,7 +1157,7 @@ class TaskStateMachine(Node):
                 r = subprocess.run(
                     ["bash", script, "on", color, str(cid)],
                     check=False,
-                    timeout=20,
+                    timeout=4,
                     capture_output=True,
                     text=True,
                 )
@@ -1070,54 +1165,64 @@ class TaskStateMachine(Node):
                 ok = r.returncode == 0
             except Exception as exc:  # noqa: BLE001
                 self.get_logger().warn(f"cube_control.sh failed: {exc}")
-        if not ok and not self.motion.attach(color, cid):
-            self._pub_status(f"ATTACH_FAIL {color}_{cid}")
-            return False
-        self._pub_status(f"MTC_ATTACH_OK {color}_{cid}")
-        time.sleep(0.2)
+        if not ok:
+            ok = bool(self.motion.attach(color, cid))
+        if ok:
+            self._pub_status(f"MTC_ATTACH_OK {color}_{cid}")
+        else:
+            self._pub_status(
+                f"ATTACH_SOFT_FAIL {color}_{cid} → 仍抬臂去放置区"
+            )
+        time.sleep(0.05)
 
-        # 抬起带走，再等底盘/定位稳定后再去放置区
+        # 抬起带走（先离地再收，避免卡在下探姿态）
         self._pub_status("MTC_LIFT")
         if not self.motion.arm_carry_pose(0.0):
-            self.get_logger().warn("carry pose failed; cube may still be attached")
+            self.get_logger().warn("carry pose failed; continue to place anyway")
         else:
             self._pub_status("MTC_LIFT_OK")
         self.motion.stop_chassis()
-        # 等臂收稳再导航出门，避免中间墙刮臂（原 2.0s，略收）
-        time.sleep(1.5)
-        return True
+        time.sleep(0.25)
+        return True  # 不管夹没夹到都去放置区
 
     def _place_with_moveit(self, color: str, cid: int) -> bool:
-        """到放置区：预设放置姿态 → Detach → 收臂（不做瞬移/冻结/回货架）。"""
+        """放置：快速下探 → 立刻松开 → 马上抬臂（不等待）。"""
         import subprocess
         import os
 
-        self._pub_status("PLACE_ARM 预设放置姿态")
+        self._pub_status("PLACE_ARM 快速下放")
         if not self.motion.arm_place_pose():
             self.get_logger().warn("place pose failed; still try detach")
-        self._pub_status(f"DETACH → cube_control off {color} {cid}")
+
+        # 先走 ROS detach（快），cube_control 短超时，绝不干等
+        self._pub_status(f"DETACH → {color}_{cid}（立刻抬臂）")
+        ok = bool(self.motion.detach(color, cid))
         script = os.path.join(
             os.path.expanduser("~/dev_ws/yzbot/src"), "cube_control.sh"
         )
-        ok = False
         if os.path.isfile(script):
             try:
                 r = subprocess.run(
                     ["bash", script, "off", color, str(cid)],
                     check=False,
-                    timeout=20,
+                    timeout=2,
                     capture_output=True,
                     text=True,
                 )
-                self.get_logger().info(r.stdout or "")
-                ok = r.returncode == 0
+                if r.returncode == 0:
+                    ok = True
+                if r.stdout:
+                    self.get_logger().info(r.stdout)
             except Exception as exc:  # noqa: BLE001
-                self.get_logger().warn(f"cube_control off failed: {exc}")
-        if not ok and not self.motion.detach(color, cid):
-            self._pub_status(f"DETACH_FAIL {color}_{cid}")
-            return False
-        self._pub_status(f"DETACH_OK {color}_{cid}")
-        self.motion.arm_home()
+                self.get_logger().warn(f"cube_control off skipped: {exc}")
+        if ok:
+            self._pub_status(f"DETACH_OK {color}_{cid}")
+        else:
+            self._pub_status(f"DETACH_SOFT_FAIL {color}_{cid} → 仍马上抬臂")
+
+        # 放下后立刻抬起，不 sleep
+        self._pub_status("PLACE_LIFT 马上抬起")
+        self.motion.arm_lift_after_place()
         return True
 
     def _run_command(self, text: str):
@@ -1185,6 +1290,8 @@ class TaskStateMachine(Node):
             self._pub_status("EMPTY_QUEUE")
             return
 
+        self._zone_place_count = {"A": 0, "B": 0, "C": 0}
+
         if dry:
             for color, cid, zone in queue:
                 self._pub_status(f"DRY: pick {color}_{cid} -> zone {zone}")
@@ -1226,31 +1333,20 @@ class TaskStateMachine(Node):
 
             pick_ok = False
             if mode in ("known_coords", "known", "map", "coord", "attach_only"):
-                # ONE continuous MODE_LOCAL: face → creep → scan → opencv (no mid stops)
+                # Nav already parked near cube → face → scan/opencv (no blind creep)
                 mx, my, _mz = known_cube_xy(color, cid)
-                so = float(self.get_parameter("grasp_creep_m").value)
-                # Align / pick to preset reach (not a looser visual-only distance)
                 reach_r = float(self.get_parameter("visual_target_r").value)
                 settle = float(self.get_parameter("local_settle_sec").value)
                 self._pub_status(
-                    f"LOCAL_FLOW → 正对+开到~{reach_r:.2f}m(臂长)再贴框 "
+                    f"LOCAL_FLOW → 导航到位后转向识别 "
                     f"{color}_{cid} map=({mx:.2f},{my:.2f})"
                 )
                 self.motion.enter_local_mode(settle_sec=min(0.08, settle))
                 aligned = False
                 try:
-                    # Fast path: face → creep → opencv → pick (no post-spin!)
+                    # Turn to known XY, then vision — no open-loop slow creep
                     self._face_cube_yaw(
                         color, cid, manage_mode=False, reanchor=False
-                    )
-                    self._pub_status(f"CREEP_MAP → ≤{reach_r:.2f}m")
-                    self.motion.creep_to_known_cube(
-                        color,
-                        cid,
-                        target_range=reach_r,
-                        max_vx=0.16,
-                        max_wz=0.20,
-                        timeout=8.0,
                     )
 
                     def _on_oc(
@@ -1270,7 +1366,6 @@ class TaskStateMachine(Node):
                             grasp_box_frac=grasp_box_frac,
                         )
 
-                    # Quick see? skip long SCAN if already in FOV
                     bgr0 = self.motion.grab_front_bgr()
                     seen0 = False
                     if bgr0 is not None:
@@ -1279,16 +1374,24 @@ class TaskStateMachine(Node):
                             bgr0, color, min_cy_frac=0.10
                         ) is not None
                     if not seen0:
-                        self._pub_status("SCAN_MAP 短扫（未见色块）")
-                        self.motion.scan_known_cube_until_seen(
-                            color,
-                            cid,
-                            max_wz=0.18,
-                            timeout=4.0,
-                            on_frame=lambda b, bl, p, prefer_uv=None, lv=None, gb=None: _on_oc(
-                                b, bl, p, prefer_uv, lv, gb
-                            ),
+                        self._pub_status("SCAN_MAP 按坐标扫（未见色块）")
+                        seen0 = bool(
+                            self.motion.scan_known_cube_until_seen(
+                                color,
+                                cid,
+                                max_wz=0.24,
+                                timeout=10.0,
+                                min_area=25.0,
+                                on_frame=lambda b, bl, p, prefer_uv=None, lv=None, gb=None: _on_oc(
+                                    b, bl, p, prefer_uv, lv, gb
+                                ),
+                            )
                         )
+                        if not seen0:
+                            self._pub_status(
+                                f"SCAN_MAP_MISS {color}_{cid} "
+                                f"map=({mx:.2f},{my:.2f}) → 仍按坐标接近"
+                            )
 
                     self._pub_status("OPENCV_ALIGN")
                     aligned = self.motion.opencv_align_to_cube(
@@ -1304,9 +1407,9 @@ class TaskStateMachine(Node):
                         max_wz=min(
                             0.16, float(self.get_parameter("align_max_wz").value)
                         ),
-                        max_vx=0.14,
-                        timeout=16.0,
-                        stable_hold_sec=0.25,
+                        max_vx=0.15,
+                        timeout=7.5,
+                        stable_hold_sec=0.18,
                         lock_v_frac=float(self.get_parameter("lock_v_frac").value),
                         grasp_box_frac=float(
                             self.get_parameter("grasp_box_frac").value
@@ -1329,7 +1432,7 @@ class TaskStateMachine(Node):
                             "OPENCV_OK → 直接下探（不再 FINAL 拧头/硬拉）"
                         )
                     else:
-                        # Only if failed: gentle visual creep, NO map face spin
+                        # Soft visual nudge; if still no lock, known_coords still arm-down
                         self._pub_status("OPENCV_SOFT → VIS 轻拉（不拧头）")
                         aligned = self.motion.drive_until_visually_near(
                             color,
@@ -1342,20 +1445,34 @@ class TaskStateMachine(Node):
                             ),
                             min_fill=1.20,
                             min_cy_frac=0.72,
-                            max_vx=0.10,
-                            timeout=8.0,
-                            max_travel_m=0.28,
+                            max_vx=0.08,
+                            timeout=3.5,
+                            max_travel_m=0.18,
                         )
                         if not aligned:
-                            self._pub_status(
-                                "PICK_ABORT 画面未够近 — 不下探"
+                            from yzbot_task.vision_pose import cube_bearing_in_base
+                            info = cube_bearing_in_base(
+                                self.motion.tf_buffer, color, cid
                             )
-                            return
+                            # known_coords: always allow preset if we have map XY
+                            if info is not None and float(info[1]) <= float(reach_r) + 0.55:
+                                self._pub_status(
+                                    f"VIS_SOFT r={float(info[1]):.2f}m "
+                                    f"→ 按已知坐标下探"
+                                )
+                                aligned = True
+                            else:
+                                self._pub_status(
+                                    f"VIS_SOFT 无TF/偏远 → 仍按已知坐标 "
+                                    f"({mx:.2f},{my:.2f}) 下探"
+                                )
+                                aligned = True  # known_coords 不因视觉卡死
                 finally:
                     self.motion.stop_chassis()
                     self.motion.exit_local_mode()
 
                 # Quick pin — short settle only
+                so = float(self.get_parameter("grasp_standoff_m").value)
                 ax, ay, ayaw = self._parking_xy(color, cid, standoff_m=so)
                 cur = self.motion.get_base_xy_yaw_map()
                 if cur is not None:
@@ -1365,10 +1482,10 @@ class TaskStateMachine(Node):
                         float(cur[2]),
                     )
                     self.motion.reanchor_amcl(
-                        pin_x, pin_y, pin_yaw, settle_sec=0.15
+                        pin_x, pin_y, pin_yaw, settle_sec=0.10
                     )
                 else:
-                    self.motion.reanchor_amcl(ax, ay, ayaw, settle_sec=0.15)
+                    self.motion.reanchor_amcl(ax, ay, ayaw, settle_sec=0.10)
                 self.motion.clear_costmaps()
 
                 self.motion.stop_chassis()
@@ -1390,37 +1507,53 @@ class TaskStateMachine(Node):
                 self._pub_status("STOP (未夹到，不去放置区)")
                 return
 
+            # Drop on zone center (no inward bias). Tiny Y slot only if same zone again.
+            tx, ty, slot_i = self._place_slot_xy(zx, zy, zone)
+            tx, ty, _approach_yaw = self._place_drop_inward(tx, ty, zx, zy)
+            self._pub_status(
+                f"PLACE_TARGET zone={zone} #{slot_i} "
+                f"drop=({tx:.2f},{ty:.2f}) 区心=({zx:.2f},{zy:.2f})"
+            )
+
             if not skip_nav:
                 front_m = float(self.get_parameter("place_front_m").value)
                 self._pub_status(
-                    f"NAV_PLACE → zone {zone} 中心 "
-                    f"(车前≈{front_m:.2f}m 对准区心再放下)"
+                    f"NAV_PLACE → zone {zone} 正前方{front_m:.2f}m=区心 "
+                    f"投放=({tx:.2f},{ty:.2f})"
                 )
+                # Allow path into this zone; keep other pads as keepout
+                self.motion.set_keepout_except(zone)
                 self.motion.prepare_next_nav()
                 if self._is_first_red(color, cid) and self._door_via_for_zone(zone):
                     if not self._nav_continuous_with_door(
-                        zx,
-                        zy,
+                        tx,
+                        ty,
                         0.0,
                         place_mode=True,
-                        xy_tol=0.40,
+                        xy_tol=0.18,
                         use_door_via=True,
                     ):
                         self._pub_status(f"NAV_PLACE_FAIL {zone}")
+                        self.motion.set_keepout_except(None)
                         return
                 elif not self.motion.navigate_place_zone(
-                    zx, zy, xy_tol=0.35, approach_standoff=front_m
+                    tx, ty, xy_tol=0.18, approach_standoff=front_m
                 ):
                     self._pub_status(f"NAV_PLACE_FAIL {zone}")
+                    self.motion.set_keepout_except(None)
                     return
-                # Dock: base at zone − front_m·heading, so 车前≈front_m 落在区心
-                self._dock_place_front(zx, zy, front_m=front_m)
+                self._dock_place_front(tx, ty, front_m=front_m)
 
             if not self._place_with_moveit(color, cid):
+                self.motion.set_keepout_except(None)
                 return
-            self._pub_status(f"PLACED {color}_{cid} at {zone}")
+            zkey = str(zone).strip().upper()
+            self._zone_place_count[zkey] = int(self._zone_place_count.get(zkey, 0)) + 1
+            self._pub_status(f"PLACED {color}_{cid} at {zone} slot#{slot_i}")
             # Leave zone so next path does not drive over the just-placed cube
-            self._leave_zone_after_place(zx, zy)
+            self._leave_zone_after_place(tx, ty)
+            # Re-block all place pads (including this one) for next pick legs
+            self.motion.set_keepout_except(None, clear_maps=False)
             cur = self.motion.get_base_xy_yaw_map()
             pyaw = float(cur[2]) if cur is not None else zyaw
             lx = float(cur[0]) if cur is not None else zx
@@ -1431,214 +1564,107 @@ class TaskStateMachine(Node):
         self._pub_status("DONE")
 
     def _dock_place_front(
-        self, zx: float, zy: float, *, front_m: float = 0.20
+        self, zx: float, zy: float, *, front_m: float = 0.38
     ) -> None:
-        """Dock with car heading along zone long axis (front ⊥ long edge).
-
-        Zone pad is 1.0m (X) × 0.5m (Y). Approach from ±X so yaw is 0 or π:
-        car body along the long side, bumper perpendicular to the long edge;
-        车前 front_m = zone center.
-        """
+        """Park so zone is straight ahead at front_m (arm drop ≈0.38m), yaw faces pad."""
         settle = float(self.get_parameter("local_settle_sec").value)
         cur = self.motion.get_base_xy_yaw_map()
         if cur is None:
             return
         rx, ry = float(cur[0]), float(cur[1])
-        # Prefer ±X docks (perpendicular to long edge) — not ±Y parallel
+        # Only ±X docks so arm (j1=0) points straight into the letter pad
         cands = [
-            (float(zx) - front_m, float(zy), 0.0),       # from -X, face +X
-            (float(zx) + front_m, float(zy), math.pi),   # from +X, face -X
+            (float(zx) - front_m, float(zy), 0.0),
+            (float(zx) + front_m, float(zy), math.pi),
         ]
         px, py, pyaw = min(
             cands, key=lambda p: (p[0] - rx) ** 2 + (p[1] - ry) ** 2
         )
         self._pub_status(
-            f"PLACE_DOCK 垂直长边 → base=({px:.2f},{py:.2f}) "
-            f"yaw={pyaw:+.2f} 车前{front_m:.2f}m=区心({zx:.2f},{zy:.2f})"
+            f"PLACE_DOCK 正前方 → base=({px:.2f},{py:.2f}) yaw={pyaw:+.2f} "
+            f"投放点=车前{front_m:.2f}m=({zx:.2f},{zy:.2f})"
         )
-        # Nav coarse to dock (keep intended yaw)
         self.motion.exit_local_mode()
         self.motion.navigate(
             px,
             py,
             pyaw,
-            timeout=60.0,
-            early_xy_tol=0.30,
+            timeout=50.0,
+            early_xy_tol=0.12,
             soft_start=True,
         )
-        self.motion.enter_local_mode(settle_sec=min(0.10, settle))
+        self.motion.enter_local_mode(settle_sec=min(0.08, settle))
         try:
-            # Spin to pad-perpendicular yaw (along long axis)
             for _ in range(2):
                 c = self.motion.get_base_xy_yaw_map()
                 if c is None:
                     break
                 rem = self.motion._wrap_pi(pyaw - float(c[2]))
-                if abs(rem) <= 0.10:
+                if abs(rem) <= 0.25:
                     break
                 self.motion.spin_yaw_openloop(
-                    float(rem), max_wz=0.22, timeout=5.0
+                    float(rem), max_wz=0.28, timeout=4.0
                 )
-            # Creep so front point lands on zone center
             t0 = time.time()
-            while time.time() - t0 < 10.0:
+            while time.time() - t0 < 5.0:
                 c = self.motion.get_base_xy_yaw_map()
                 if c is None:
                     break
-                # Desired: base at (px,py) with yaw≈pyaw
                 dx = px - float(c[0])
                 dy = py - float(c[1])
                 rng = math.hypot(dx, dy)
-                fx = float(c[0]) + front_m * math.cos(float(c[2]))
-                fy = float(c[1]) + front_m * math.sin(float(c[2]))
+                yaw = float(c[2])
+                fx = float(c[0]) + front_m * math.cos(yaw)
+                fy = float(c[1]) + front_m * math.sin(yaw)
                 d_drop = math.hypot(fx - zx, fy - zy)
-                if rng <= 0.06 and d_drop <= 0.10:
+                rem = self.motion._wrap_pi(pyaw - yaw)
+                if rng <= 0.10 and d_drop <= 0.12 and abs(rem) <= 0.30:
                     break
-                if d_drop <= 0.08 and abs(
-                    self.motion._wrap_pi(pyaw - float(c[2]))
-                ) <= 0.15:
-                    break
-                rem = self.motion._wrap_pi(pyaw - float(c[2]))
-                wz = max(-0.20, min(0.20, 1.0 * rem))
+                wz = max(-0.20, min(0.20, 0.9 * rem)) if abs(rem) > 0.20 else 0.0
                 des = math.atan2(dy, dx)
-                rem_drive = self.motion._wrap_pi(des - float(c[2]))
-                if abs(rem) > 0.35:
+                rem_drive = self.motion._wrap_pi(des - yaw)
+                if abs(rem) > 0.50:
                     vx = 0.0
-                elif abs(rem_drive) < 0.60:
-                    vx = 0.10 if rng > 0.06 else 0.0
+                elif abs(rem_drive) < 0.65:
+                    vx = 0.12 if rng > 0.10 else 0.0
                 else:
                     vx = 0.0
-                # Overshoot: zone closer than front_m along forward → reverse
-                fwd_x, fwd_y = math.cos(float(c[2])), math.sin(float(c[2]))
-                to_zx, to_zy = zx - float(c[0]), zy - float(c[1])
-                ahead = to_zx * fwd_x + to_zy * fwd_y
-                if ahead < front_m - 0.06:
-                    vx = -0.08
-                    wz = max(-0.15, min(0.15, rem))
+                ahead = (zx - float(c[0])) * math.cos(yaw) + (
+                    zy - float(c[1])
+                ) * math.sin(yaw)
+                if ahead < front_m - 0.08:
+                    vx = -0.10
                 self.motion.publish_cmd_vel(vx, wz)
                 time.sleep(0.08)
-            # Final yaw lock (perpendicular to long edge)
-            c2 = self.motion.get_base_xy_yaw_map()
-            if c2 is not None:
-                rem2 = self.motion._wrap_pi(pyaw - float(c2[2]))
-                if abs(rem2) > 0.08:
-                    self.motion.spin_yaw_openloop(
-                        float(rem2), max_wz=0.18, timeout=4.0
-                    )
             self.motion.stop_chassis()
             c3 = self.motion.get_base_xy_yaw_map()
             if c3 is not None:
-                fx = float(c3[0]) + front_m * math.cos(float(c3[2]))
-                fy = float(c3[1]) + front_m * math.sin(float(c3[2]))
-                yaw_err = self.motion._wrap_pi(pyaw - float(c3[2]))
+                yaw = float(c3[2])
+                fx = float(c3[0]) + front_m * math.cos(yaw)
+                fy = float(c3[1]) + front_m * math.sin(yaw)
+                yaw_err = self.motion._wrap_pi(pyaw - yaw)
                 self._pub_status(
-                    f"PLACE_DOCK_OK 垂直长边 yaw_err={yaw_err:+.2f} "
-                    f"车前=({fx:.2f},{fy:.2f}) 区心=({zx:.2f},{zy:.2f}) "
-                    f"err={math.hypot(fx - zx, fy - zy):.2f}m"
+                    f"PLACE_DOCK_OK 正前方 yaw_err={yaw_err:+.2f} "
+                    f"车前{front_m:.2f}m=({fx:.2f},{fy:.2f}) "
+                    f"区=({zx:.2f},{zy:.2f}) err={math.hypot(fx - zx, fy - zy):.2f}m"
                 )
         finally:
             self.motion.stop_chassis()
             self.motion.exit_local_mode()
 
     def _leave_zone_after_place(self, zx: float, zy: float) -> None:
-        """Get clear of zone pile BEFORE any yaw turn (in-place spin crushes cubes).
-
-        1) Straight reverse open-loop (wz=0) — never pivot on the pile
-        2) Drive radially outward from zone center to ≥1.35 m
-        3) Only then hand wheels to Nav2 for the next pick
-        """
+        """Straight reverse only — clear the pad so next approach won't crush cubes."""
         settle = float(self.get_parameter("local_settle_sec").value)
-        leave_r = 1.35
-        cur = self.motion.get_base_xy_yaw_map()
-        if cur is None:
-            yaw = 0.0
-            rx, ry = float(zx), float(zy)
-        else:
-            rx, ry, yaw = float(cur[0]), float(cur[1]), float(cur[2])
-
-        # Unit vector away from zone center (radial exit)
-        dx, dy = rx - float(zx), ry - float(zy)
-        dist0 = math.hypot(dx, dy)
-        if dist0 < 0.12:
-            ux, uy = -math.cos(yaw), -math.sin(yaw)
-        else:
-            ux, uy = dx / dist0, dy / dist0
-        lx = float(zx) + ux * leave_r
-        ly = float(zy) + uy * leave_r
-
-        self._pub_status(
-            f"LEAVE_ZONE 先直行倒出，再离开区心 → ({lx:.2f},{ly:.2f}) "
-            f"r≥{leave_r:.2f}m（禁止区上原地转向压块）"
-        )
-        self.motion.enter_local_mode(settle_sec=min(0.20, settle))
+        self._pub_status("LEAVE_ZONE 直行倒退离开堆放区（不转向）→ 直接规划")
+        self.motion.enter_local_mode(settle_sec=min(0.10, settle))
         try:
-            # Same path as before; vx 0.14→0.18 only (distance unchanged)
-            self.motion.drive_openloop_distance(-0.85, vx=0.18, timeout=10.0)
-            time.sleep(0.15)
-            cur2 = self.motion.get_base_xy_yaw_map()
-            if cur2 is not None:
-                rx, ry, yaw = float(cur2[0]), float(cur2[1]), float(cur2[2])
-            # Recompute radial target from new pose
-            dx, dy = rx - float(zx), ry - float(zy)
-            dist1 = math.hypot(dx, dy)
-            if dist1 < 0.12:
-                ux, uy = -math.cos(yaw), -math.sin(yaw)
-            else:
-                ux, uy = dx / dist1, dy / dist1
-            lx = float(zx) + ux * leave_r
-            ly = float(zy) + uy * leave_r
-
-            # 2) Face leave point gently, then drive forward (still no big in-place spin on pile)
-            des = math.atan2(ly - ry, lx - rx)
-            rem = self.motion._wrap_pi(des - yaw)
-            # Only nudge yaw if already somewhat clear (>0.45m from center)
-            if dist1 >= 0.45 and abs(rem) > 0.20:
-                # Cap spin: prefer small correction, not full pivot on cubes
-                self.motion.spin_yaw_openloop(
-                    float(max(-0.55, min(0.55, rem))),
-                    max_wz=0.18,
-                    timeout=4.0,
-                )
-            need = math.hypot(lx - rx, ly - ry)
-            if need > 0.20:
-                # Drive mostly straight toward leave; if still skewed, reverse more
-                if abs(rem) > 1.0 and dist1 < 0.55:
-                    self.motion.drive_openloop_distance(-0.50, vx=0.16, timeout=6.0)
-                else:
-                    self.motion.drive_openloop_distance(
-                        min(need, 1.10), vx=0.18, timeout=12.0
-                    )
+            # A bit farther back so same-zone next slot path stays clear of cubes
+            self.motion.drive_openloop_distance(-0.85, vx=0.36, timeout=4.5)
         finally:
             self.motion.stop_chassis()
             self.motion.exit_local_mode()
-
-        # 3) Soft Nav polish to leave XY (keep yaw — avoid RotateToGoal on pile)
-        cur3 = self.motion.get_base_xy_yaw_map()
-        keep_yaw = float(cur3[2]) if cur3 is not None else yaw
-        dleft = (
-            math.hypot(float(cur3[0]) - float(zx), float(cur3[1]) - float(zy))
-            if cur3 is not None
-            else 0.0
-        )
-        if dleft < leave_r - 0.15:
-            self._pub_status(
-                f"LEAVE_ZONE_NAV → ({lx:.2f},{ly:.2f}) 补齐离区 "
-                f"(now r={dleft:.2f}m)"
-            )
-            ok = self.motion.navigate(
-                lx,
-                ly,
-                keep_yaw,
-                timeout=45.0,
-                early_xy_tol=0.40,
-                soft_start=True,
-            )
-            if not ok:
-                self.get_logger().warn("LEAVE_ZONE nav soft-fail — continue anyway")
-        else:
-            self._pub_status(f"LEAVE_ZONE_OK r={dleft:.2f}m 已离开堆放区")
-        self.motion.stop_chassis()
-        time.sleep(0.2)
+        self._pub_status("LEAVE_ZONE_OK 倒退完成 → 下一段导航直接规划")
+        time.sleep(0.05)
 
 
 def main(args=None):

@@ -99,18 +99,18 @@ controller_server:
       debug_trajectory_details: False
       min_vel_x: 0.0
       min_vel_y: 0.0
-      max_vel_x: 0.95
+      max_vel_x: 1.05
       max_vel_y: 0.0
-      max_vel_theta: 0.80
+      max_vel_theta: 0.90
       min_speed_xy: 0.0
-      max_speed_xy: 0.95
+      max_speed_xy: 1.05
       min_speed_theta: 0.0
-      acc_lim_x: 1.2
+      acc_lim_x: 1.4
       acc_lim_y: 0.0
-      acc_lim_theta: 1.0
-      decel_lim_x: -1.2
+      acc_lim_theta: 1.15
+      decel_lim_x: -1.4
       decel_lim_y: 0.0
-      decel_lim_theta: -1.0
+      decel_lim_theta: -1.15
       vx_samples: 14
       vy_samples: 1
       vtheta_samples: 16
@@ -129,7 +129,7 @@ controller_server:
         enabled: true
       BaseObstacle:
         enabled: true
-        scale: 18.0
+        scale: 28.0
       GoalAlign:
         enabled: true
         scale: 3.5
@@ -162,8 +162,8 @@ local_costmap:
       plugins: ["obstacle_layer", "denoise_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.5
-        inflation_radius: 0.35
+        cost_scaling_factor: 2.8
+        inflation_radius: 0.48
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -171,7 +171,7 @@ local_costmap:
         observation_persistence: 0.0
         expected_update_rate: 0.0
         combination_method: 1
-        observation_sources: scan
+        observation_sources: scan zone_keepout
         scan:
           topic: /scan
           max_obstacle_height: 2.0
@@ -183,6 +183,18 @@ local_costmap:
           obstacle_max_range: 6.0
           obstacle_min_range: 0.05
           inf_is_valid: false
+        # Place pads A/B/C (from task_sm) — plan around so chassis doesn't climb cubes
+        zone_keepout:
+          topic: /yzbot/zone_keepout
+          max_obstacle_height: 2.0
+          clearing: False
+          marking: True
+          data_type: "PointCloud2"
+          obstacle_max_range: 100.0
+          obstacle_min_range: 0.0
+          raytrace_max_range: 0.0
+          raytrace_min_range: 0.0
+          observation_persistence: 1.2
       denoise_layer:
         plugin: "nav2_costmap_2d::DenoiseLayer"
         enabled: True
@@ -211,7 +223,7 @@ global_costmap:
         observation_persistence: 0.0
         expected_update_rate: 0.0
         combination_method: 1
-        observation_sources: scan
+        observation_sources: scan zone_keepout
         scan:
           topic: /scan
           max_obstacle_height: 2.0
@@ -223,6 +235,17 @@ global_costmap:
           obstacle_max_range: 6.0
           obstacle_min_range: 0.05
           inf_is_valid: false
+        zone_keepout:
+          topic: /yzbot/zone_keepout
+          max_obstacle_height: 2.0
+          clearing: False
+          marking: True
+          data_type: "PointCloud2"
+          obstacle_max_range: 100.0
+          obstacle_min_range: 0.0
+          raytrace_max_range: 0.0
+          raytrace_min_range: 0.0
+          observation_persistence: 1.2
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -233,8 +256,8 @@ global_costmap:
         group_connectivity_type: 8
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.5
-        inflation_radius: 0.35
+        cost_scaling_factor: 2.8
+        inflation_radius: 0.48
       always_send_full_costmap: False
 
 map_server:
@@ -322,10 +345,10 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [0.95, 0.0, 0.80]
-    min_velocity: [-0.45, 0.0, -0.80]
-    max_accel: [1.0, 0.0, 0.90]
-    max_decel: [-1.2, 0.0, -0.90]
+    max_velocity: [1.05, 0.0, 0.90]
+    min_velocity: [-0.50, 0.0, -0.90]
+    max_accel: [1.15, 0.0, 1.00]
+    max_decel: [-1.35, 0.0, -1.00]
     odom_topic: "odometry/filtered"
     odom_duration: 0.12
     deadband_velocity: [0.0, 0.0, 0.0]
@@ -343,14 +366,22 @@ collision_monitor:
     source_timeout: 1.5
     base_shift_correction: True
     stop_pub_timeout: 2.0
-    # Mild near-obstacle soft; avoid on/off crawl stutter
-    polygons: ["PolygonCrawl"]
+    # Stop before impact, then Nav2 can replan; outer ring only slows
+    polygons: ["PolygonStop", "PolygonCrawl"]
+    PolygonStop:
+      type: "circle"
+      radius: 0.40
+      action_type: "stop"
+      min_points: 3
+      visualize: False
+      polygon_pub_topic: "polygon_stop"
+      enabled: True
     PolygonCrawl:
       type: "circle"
-      radius: 0.26
+      radius: 0.58
       action_type: "slowdown"
-      min_points: 5
-      slowdown_ratio: 0.65
+      min_points: 4
+      slowdown_ratio: 0.35
       visualize: False
       polygon_pub_topic: "polygon_crawl"
       enabled: True

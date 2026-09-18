@@ -377,49 +377,47 @@ def approach_xy_for_cube(
         return float(np.arctan2(cy - ay, cx - ax))
 
     if str(color).lower() == "blue":
-        # blue#2: park on +X (east), farther standoff so path does not skim the cube
-        if int(cube_id) == 2:
-            so2 = max(so, 0.40)
-            ax, ay = float(cx + so2), float(cy)
+        # Farther park so Nav2 / creep do not sit on the cube (FOV miss).
+        so_b = max(so, 0.65)
+        # Park on the SAME side of the cube as the robot — never force west
+        # when the car is east (that path drives over the block).
+        if robot_xy is not None:
+            rx = float(robot_xy[0])
+            if rx >= float(cx):
+                ax, ay = float(cx + so_b), float(cy)  # east, face −X
+            else:
+                ax, ay = float(cx - so_b), float(cy)  # west, face +X
+        elif int(cube_id) == 2:
+            ax, ay = float(cx + so_b), float(cy)
         else:
-            ax, ay = float(cx - so), float(cy)
+            ax, ay = float(cx - so_b), float(cy)
         return ax, ay, _face(ax, ay)
 
-    same_y = [
-        (cx + so, cy),  # east
-        (cx - so, cy),  # west
-    ]
-    same_x = [
-        (cx, cy + so),  # north
-        (cx, cy - so),  # south
-    ]
+    # Red: ALWAYS park on the robot's side (never cross over the cube).
+    # Prefer ±X (side) docks — N/S parks often sit in the lower dyn_obs lane
+    # and the first-red approach from start then never puts the cube in FOV.
+    so_r = max(so, 0.58)
+    if int(cube_id) in (2, 3, 4):
+        so_r = max(so_r, 0.62)
+
     if robot_xy is None:
-        ax, ay = same_y[0]
-        return float(ax), float(ay), _face(ax, ay)
+        ax, ay = float(cx + so_r), float(cy)
+        return ax, ay, _face(ax, ay)
 
     rx, ry = float(robot_xy[0]), float(robot_xy[1])
-
-    def _d2(p):
-        return (p[0] - rx) ** 2 + (p[1] - ry) ** 2
-
-    def _score(p):
-        # Prefer nearby park; also prefer heading already close to face-cube yaw
-        # so Nav2 does not stop with travel-direction yaw and miss the cube.
-        ax, ay = p
-        face = _face(ax, ay)
-        dist = _d2(p)
-        if robot_yaw is None:
-            return dist
-        dyaw = abs(float(np.arctan2(np.sin(face - robot_yaw), np.cos(face - robot_yaw))))
-        return dist + (0.55 * dyaw) ** 2  # ~0.55m equiv per radian
-
-    best_y = min(same_y, key=_score)
-    best_x = min(same_x, key=_score)
-    if _d2(best_x) < _d2(best_y) * 0.45:
-        ax, ay = best_x
+    dx, dy = rx - float(cx), ry - float(cy)
+    # Bias to lateral park (keeps camera aimed at cube, clear of obs2)
+    use_side = abs(dx) + 0.40 >= abs(dy)
+    if use_side:
+        if abs(dx) < 0.30:
+            ax = float(cx + so_r)  # nearly aligned → stand east (open corridor)
+        else:
+            ax = float(cx + so_r) if dx >= 0.0 else float(cx - so_r)
+        ay = float(cy)
     else:
-        ax, ay = best_y
-    return float(ax), float(ay), _face(ax, ay)
+        ax = float(cx)
+        ay = float(cy + so_r) if dy >= 0.0 else float(cy - so_r)
+    return ax, ay, _face(ax, ay)
 
 
 def diagnose_est_vs_known(
@@ -490,19 +488,21 @@ def ee_to_pose_distance_m(tf_buffer: Buffer, pose_arm: PoseStamped) -> Optional[
     return float(np.sqrt(dx * dx + dy * dy + dz * dz))
 
 
-# Layout from Gazebo export (export_cube_poses apply:=true).
-# Pairwise spacing should stay ≥2m for competition.
+# Layout: mid corridors + dyn_obs (E-W). Cubes/obs kept off walls; ≥2m cube spacing.
 _KNOWN_CUBES = {
-    ("red", 1): (-6.89, -2.80, 0.015),
-    ("red", 2): (-2.00, -5.85, 0.015),
-    ("red", 3): (4.24, -10.28, 0.015),
-    ("red", 4): (-2.77, 5.80, 0.015),
-    ("red", 5): (1.61, 3.35, 0.015),
-    ("blue", 1): (1.97, -0.24, 0.015),
-    ("blue", 2): (-5.87, -6.68, 0.015),
-    ("blue", 3): (-4.15, 2.35, 0.015),
-    ("blue", 4): (1.82, -5.28, 0.015),
-    ("blue", 5): (-1.78, -11.72, 0.015),
+    ("red", 1): (1.00, -9.00, 0.015),
+    ("red", 2): (0.00, -4.20, 0.015),
+    ("red", 3): (-2.80, -4.90, 0.015),
+    ("red", 4): (-4.70, -5.25, 0.015),
+    ("red", 5): (1.80, 0.40, 0.015),
+    # Was (2.45,-2.45) against east furniture/wall — moved inward
+    ("blue", 1): (1.60, -2.50, 0.015),
+    # Was in west room; now north open corridor (away from walls)
+    ("blue", 2): (-3.00, 2.10, 0.015),
+    # Was (-4.0,-0.4) in doorway — open corridor
+    ("blue", 3): (-2.50, -1.80, 0.015),
+    ("blue", 4): (2.20, -5.10, 0.015),
+    ("blue", 5): (0.541303, -11.223000, 0.015),
 }
 
 def known_cube_xy(color: str, cube_id: int):

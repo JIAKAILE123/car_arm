@@ -1,8 +1,10 @@
 """Global shortest-path task planner for random LLM task strings.
 
-Policy: freely reorder pick→place legs across colors/zones as long as each
-required (color count → zone) is fulfilled. Assigns cube ids + visit order to
-minimize Euclidean tour:
+Optimizes BOTH:
+  1) which cube id goes to which zone job
+  2) visit order of pick→place legs
+
+so total Euclidean length is minimal:
 
   start → [door vias] → cube → zone → cube → zone → …
 
@@ -61,7 +63,7 @@ def _dist(a: Point, b: Point) -> float:
 
 
 def _load_zones(poses_yaml: Optional[Path] = None) -> Dict[str, Point]:
-    zones = {"A": (5.40, -11.80), "B": (0.50, -4.20), "C": (-0.77, 2.71)}
+    zones = {"A": (-1.00, -8.10), "B": (1.50, -4.00), "C": (-0.80, 0.20)}
     path = poses_yaml or (
         Path(__file__).resolve().parents[1] / "config" / "poses.yaml"
     )
@@ -97,6 +99,7 @@ def _leg_cost(
     *,
     use_door_via: bool = True,
 ) -> Tuple[float, Point, str]:
+    """Cost of one pick→place: pos → (vias) → cube → zone. End pose = zone."""
     cube = _cube_xy(color, cid)
     zxy = zones[zone.upper()]
     pts: List[Point] = [pos]
@@ -146,95 +149,119 @@ def expand_jobs(tasks: Sequence[PickTask], max_cubes: int = 5) -> List[JobSpec]:
     return jobs
 
 
-def _assign_for_order(
-    order: Sequence[JobSpec],
+def _tour_cost(
+    legs: Sequence[Leg],
     start: Point,
     zones: Dict[str, Point],
-    fixed: Dict[str, set],
-    max_cubes: int,
     use_door_via: bool,
-) -> Optional[Tuple[float, List[Leg], List[str]]]:
-    used_walk = {"red": set(), "blue": set()}
+) -> Tuple[float, List[str]]:
     pos = start
     total = 0.0
-    legs: List[Leg] = []
     detail: List[str] = []
-    for j in order:
-        if j.fixed_id is not None:
-            cid = j.fixed_id
-            if cid in used_walk[j.color]:
-                return None
-        else:
-            best_cid = None
-            best_d = float("inf")
-            for cid in range(1, max_cubes + 1):
-                if cid in used_walk[j.color] or cid in fixed[j.color]:
-                    continue
-                d, _, _ = _leg_cost(
-                    pos, j.color, cid, j.zone, zones, use_door_via=use_door_via
-                )
-                if d < best_d:
-                    best_d, best_cid = d, cid
-            if best_cid is None:
-                return None
-            cid = best_cid
+    for color, cid, zone in legs:
         d, end, note = _leg_cost(
-            pos, j.color, cid, j.zone, zones, use_door_via=use_door_via
+            pos, color, cid, zone, zones, use_door_via=use_door_via
         )
         total += d
-        used_walk[j.color].add(cid)
-        legs.append((j.color, cid, j.zone))
-        cx, cy = _cube_xy(j.color, cid)
-        detail.append(f"Δ{d:.1f}m cube=({cx:.2f},{cy:.2f})→{j.zone}{note}")
+        cx, cy = _cube_xy(color, cid)
+        detail.append(f"Δ{d:.1f}m cube=({cx:.2f},{cy:.2f})→{zone}{note}")
         pos = end
-    return total, legs, detail
+    return total, detail
 
 
-def _nearest_job_order(
-    jobs: List[JobSpec],
+def _materialize_assignments(
+    jobs: List[JobSpec], max_cubes: int
+) -> List[List[Leg]]:
+    """All ways to bind free jobs to unused cube ids (fixed ids locked)."""
+    fixed = {"red": set(), "blue": set()}
+    for j in jobs:
+        if j.fixed_id is not None:
+            fixed[j.color].add(int(j.fixed_id))
+
+    free_idx = {"red": [], "blue": []}
+    for i, j in enumerate(jobs):
+        if j.fixed_id is None:
+            free_idx[j.color].append(i)
+
+    avail = {
+        c: [i for i in range(1, max_cubes + 1) if i not in fixed[c]]
+        for c in ("red", "blue")
+    }
+
+    # Choose which free ids to use, then assign them to free job slots
+    red_need = len(free_idx["red"])
+    blue_need = len(free_idx["blue"])
+    if red_need > len(avail["red"]) or blue_need > len(avail["blue"]):
+        return []
+
+    out: List[List[Leg]] = []
+    for red_pick in itertools.combinations(avail["red"], red_need):
+        for blue_pick in itertools.combinations(avail["blue"], blue_need):
+            for red_perm in itertools.permutations(red_pick):
+                for blue_perm in itertools.permutations(blue_pick):
+                    legs: List[Optional[Leg]] = [None] * len(jobs)
+                    ri = bi = 0
+                    ok = True
+                    for i, j in enumerate(jobs):
+                        if j.fixed_id is not None:
+                            legs[i] = (j.color, int(j.fixed_id), j.zone)
+                        elif j.color == "red":
+                            legs[i] = (j.color, int(red_perm[ri]), j.zone)
+                            ri += 1
+                        else:
+                            legs[i] = (j.color, int(blue_perm[bi]), j.zone)
+                            bi += 1
+                    if not ok or any(x is None for x in legs):
+                        continue
+                    out.append([x for x in legs if x is not None])  # type: ignore
+    return out
+
+
+def _best_order(
+    legs: List[Leg],
     start: Point,
     zones: Dict[str, Point],
-    fixed: Dict[str, set],
-    max_cubes: int,
     use_door_via: bool,
-) -> List[JobSpec]:
-    """Greedy construction when N is too large for full permutation."""
-    remaining = list(jobs)
-    built: List[JobSpec] = []
+) -> Tuple[float, List[Leg], List[str]]:
+    """Shortest visit order for a fully assigned set of legs."""
+    n = len(legs)
+    if n == 0:
+        return 0.0, [], []
+    if n == 1:
+        total, detail = _tour_cost(legs, start, zones, use_door_via)
+        return total, list(legs), detail
+
+    best_total = float("inf")
+    best_legs: List[Leg] = list(legs)
+    best_detail: List[str] = []
+
+    if n <= 8:
+        for perm in itertools.permutations(legs):
+            total, detail = _tour_cost(perm, start, zones, use_door_via)
+            if total < best_total:
+                best_total = total
+                best_legs = list(perm)
+                best_detail = detail
+        return best_total, best_legs, best_detail
+
+    # Greedy NN fallback for large N
+    remaining = list(legs)
+    built: List[Leg] = []
     pos = start
-    used = {"red": set(), "blue": set()}
     while remaining:
-        best_i = None
+        best_i = 0
         best_d = float("inf")
-        best_cid = None
-        for i, j in enumerate(remaining):
-            if j.fixed_id is not None:
-                cands = [j.fixed_id]
-            else:
-                cands = [
-                    c
-                    for c in range(1, max_cubes + 1)
-                    if c not in used[j.color] and c not in fixed[j.color]
-                ]
-            for cid in cands:
-                if cid in used[j.color]:
-                    continue
-                d, _, _ = _leg_cost(
-                    pos, j.color, cid, j.zone, zones, use_door_via=use_door_via
-                )
-                if d < best_d:
-                    best_d, best_i, best_cid = d, i, cid
-        if best_i is None or best_cid is None:
-            # append rest as-is
-            built.extend(remaining)
-            break
-        j = remaining.pop(best_i)
-        built.append(j)
-        used[j.color].add(best_cid)
+        for i, (c, cid, z) in enumerate(remaining):
+            d, _, _ = _leg_cost(pos, c, cid, z, zones, use_door_via=use_door_via)
+            if d < best_d:
+                best_d, best_i = d, i
+        leg = remaining.pop(best_i)
+        built.append(leg)
         _, pos, _ = _leg_cost(
-            pos, j.color, best_cid, j.zone, zones, use_door_via=use_door_via
+            pos, leg[0], leg[1], leg[2], zones, use_door_via=use_door_via
         )
-    return built
+    total, detail = _tour_cost(built, start, zones, use_door_via)
+    return total, built, detail
 
 
 def plan_route(
@@ -245,42 +272,48 @@ def plan_route(
     use_door_via: bool = True,
     poses_yaml: Optional[Path] = None,
 ) -> PlanResult:
-    """Parse command → globally reorder legs for shortest Euclidean tour."""
+    """Parse command → assign cubes + reorder for shortest Euclidean tour."""
     tasks = parse_command(command, max_cubes=max_cubes)
     jobs = expand_jobs(tasks, max_cubes=max_cubes)
     if not jobs:
         raise ValueError("no jobs to plan")
     zones = _load_zones(poses_yaml)
-    fixed = {"red": set(), "blue": set()}
-    for j in jobs:
-        if j.fixed_id is not None:
-            fixed[j.color].add(j.fixed_id)
 
-    best: Optional[Tuple[float, List[Leg], List[str]]] = None
-    n = len(jobs)
-
-    if n <= 8:
-        for perm in itertools.permutations(jobs):
-            got = _assign_for_order(
-                perm, start, zones, fixed, max_cubes, use_door_via
-            )
-            if got is None:
-                continue
-            if best is None or got[0] < best[0]:
-                best = got
-    else:
-        order = _nearest_job_order(
-            jobs, start, zones, fixed, max_cubes, use_door_via
-        )
-        best = _assign_for_order(
-            order, start, zones, fixed, max_cubes, use_door_via
-        )
-
-    if best is None:
+    assignments = _materialize_assignments(jobs, max_cubes)
+    if not assignments:
         raise RuntimeError("route planning failed (cube conflict?)")
 
-    total, legs, detail = best
-    return PlanResult(legs=legs, total_m=total, start=start, detail=detail)
+    # Cap combinatorial blow-up: if too many assignments, sample via greedy ids
+    # then only optimize order. Typical contest: ≤5 legs → fine.
+    MAX_ASSIGN = 1200
+    if len(assignments) > MAX_ASSIGN:
+        # Prefer assignments that use cubes nearest to their zone (cheap filter)
+        def _assign_score(legs: List[Leg]) -> float:
+            s = 0.0
+            for c, cid, z in legs:
+                s += _dist(_cube_xy(c, cid), zones[z.upper()])
+            return s
+
+        assignments = sorted(assignments, key=_assign_score)[:MAX_ASSIGN]
+
+    best_total = float("inf")
+    best_legs: List[Leg] = []
+    best_detail: List[str] = []
+    for legs in assignments:
+        total, ordered, detail = _best_order(
+            legs, start, zones, use_door_via
+        )
+        if total < best_total:
+            best_total = total
+            best_legs = ordered
+            best_detail = detail
+
+    if not best_legs:
+        raise RuntimeError("route planning failed (empty)")
+
+    return PlanResult(
+        legs=best_legs, total_m=best_total, start=start, detail=best_detail
+    )
 
 
 def plan_to_queue(result: PlanResult) -> List[Leg]:
@@ -290,8 +323,6 @@ def plan_to_queue(result: PlanResult) -> List[Leg]:
 def main(argv: Optional[Iterable[str]] = None) -> None:
     import sys
 
-    # Quick non-ROS: python3 -c "from yzbot_task.route_planner import plan_route; print(...)"
-    # When launched via console_scripts / ros2 run, use ROS params only.
     if argv is not None:
         argv = list(argv)
     elif len(sys.argv) > 1 and sys.argv[1].startswith("["):

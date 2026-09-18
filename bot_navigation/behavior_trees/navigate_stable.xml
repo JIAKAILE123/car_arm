@@ -1,5 +1,5 @@
 <!--
-  Smooth drive: replan 1.2 Hz (slight bump for dyn_obs). Other recovery unchanged.
+  Smooth drive + dyn_obs: replan ~1.2 Hz; on stuck STOP → brief wait → backup → clear → replan.
 -->
 <root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
@@ -12,11 +12,14 @@
           </RecoveryNode>
         </RateController>
 
-        <RecoveryNode number_of_retries="3" name="FollowPath">
+        <RecoveryNode number_of_retries="4" name="FollowPath">
           <FollowPath path="{path}" controller_id="FollowPath"/>
           <Sequence name="UnstickLocal">
+            <!-- About to hit / stuck: stop (no cmd), wait, back off, clear, replan -->
+            <Wait wait_duration="0.55"/>
+            <BackUp backup_dist="0.25" backup_speed="0.08"/>
             <ClearEntireCostmap name="ClearLocal" service_name="local_costmap/clear_entirely_local_costmap"/>
-            <Wait wait_duration="0.4"/>
+            <Wait wait_duration="0.35"/>
           </Sequence>
         </RecoveryNode>
       </PipelineSequence>
@@ -24,11 +27,14 @@
       <ReactiveFallback name="RecoveryFallback">
         <GoalUpdated/>
         <RoundRobin name="RecoveryActions">
-          <ClearEntireCostmap name="ClearLocalRecovery" service_name="local_costmap/clear_entirely_local_costmap"/>
-          <Spin spin_dist="0.9"/>
-          <BackUp backup_dist="0.28" backup_speed="0.10"/>
+          <Sequence name="StopClear">
+            <Wait wait_duration="0.45"/>
+            <ClearEntireCostmap name="ClearLocalRecovery" service_name="local_costmap/clear_entirely_local_costmap"/>
+          </Sequence>
+          <BackUp backup_dist="0.30" backup_speed="0.09"/>
+          <Spin spin_dist="0.7"/>
           <ClearEntireCostmap name="ClearGlobalRecovery" service_name="global_costmap/clear_entirely_global_costmap"/>
-          <Wait wait_duration="0.5"/>
+          <Wait wait_duration="0.55"/>
         </RoundRobin>
       </ReactiveFallback>
     </RecoveryNode>

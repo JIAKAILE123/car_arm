@@ -54,13 +54,15 @@ private:
       return;
     }
 
-    // Orange path (now grey): straight N-S at x=-1.3; period 40s
-    const double y1 = 1.6 * std::sin(2.0 * M_PI * t / 40.0);
-    SetPose(this->obs1_, -1.3, y1, 0.20);
+    // Both horizontal bars slide on X. Keep clear of cube lanes.
+    // Period ~42s; smaller amp + mid-corridor Y so bars don't skim cubes.
+    // obs1: between blue#3 (y≈-0.4) and zone B (y≈-4)
+    const double x1 = 0.20 + 0.50 * std::sin(2.0 * M_PI * t / 42.0);
+    SetPose(this->obs1_, x1, -1.35, 0.20);
 
-    // Cyan path (now grey): straight E-W at y=-6.5; center x≈0.5
-    const double x2 = 0.5 + 1.2 * std::sin(2.0 * M_PI * t / 40.0);
-    SetPose(this->obs2_, x2, -6.5, 0.20);
+    // obs2: keep clear of blue#5 (south) and red#3/#4 (north); smaller amp
+    const double x2 = 0.00 + 0.45 * std::sin(2.0 * M_PI * t / 42.0 + 1.2);
+    SetPose(this->obs2_, x2, -6.15, 0.20);
   }
 
   static void SetPose(
