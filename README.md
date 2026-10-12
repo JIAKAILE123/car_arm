@@ -23,6 +23,19 @@ cd ~/dev_ws/yzbot
 正式比赛隐藏总用时：`SHOW_ELAPSED=false ./run.sh`  
 不开出题终端：`RUN_EXAM=false ./run.sh`
 
+### 多套题练习（官方 bin 只有 2 题）
+
+```bash
+# 验解题：本地秒过全部边界题（ceil / 都需要 / 区映射 AA·AC·CA·CC）
+ros2 run yzbot_task practice_exam --ros-args -p mode:=check -p backend:=local
+
+# 整机按空格出下一套自然语言题（走大模型）
+EXAM_BANK=practice ./run.sh
+
+# 整机按空格直接发 /task_command（跳过解题，专测导航取放组合）
+EXAM_BANK=robot ./run.sh
+```
+
 ---
 
 ## 改代码后编译

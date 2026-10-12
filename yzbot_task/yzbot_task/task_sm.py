@@ -96,7 +96,8 @@ class TaskStateMachine(Node):
         self.declare_parameter("shelf_z", 0.75)
         self.declare_parameter("grasp_above", 0.05)
         self.declare_parameter("grasp_down", 0.0)
-        self.declare_parameter("attach_max_dist", 0.45)
+        # EE 到块超过此距禁止 ATTACH（LinkAttacher 会远处拽块）
+        self.declare_parameter("attach_max_dist", 0.32)
         # Place: park by place_front_m (calibrated physical EE). Optional pull-back.
         self.declare_parameter("place_front_m", float(PLACE_FRONT_M))
         # Negative = toward robot / outer edge; Positive = deeper into pad (区心)
@@ -1198,11 +1199,40 @@ class TaskStateMachine(Node):
 
         严禁在臂未到位时 ATTACH：LinkAttacher 用单位姿对齐，会先把块扯到
         link6（看起来像「夹一下块就飞起来，然后臂才下来」）。
+        严禁在底盘仍远时下探/吸附（远处「看见」也会误夹拽块）。
         """
         import subprocess
         import os
 
+        from yzbot_task.vision_pose import (
+            cube_bearing_in_base,
+            ee_to_pose_distance_m,
+            known_cube_pose_arm_raw,
+            known_cube_xy,
+        )
+
         self.motion.stop_chassis()
+
+        # —— 下探前硬距离门：底盘到块必须在预设臂可达带内 ——
+        reach = float(self.get_parameter("visual_target_r").value)
+        max_base_r = reach + 0.10
+        info = cube_bearing_in_base(self.motion.tf_buffer, color, cid)
+        if info is not None:
+            base_r = float(info[1])
+        else:
+            cur = self.motion.get_base_xy_yaw_map()
+            if cur is None:
+                self._pub_status("PICK_ABORT NO_POSE_BEFORE_ARM")
+                return False
+            mx, my, _ = known_cube_xy(color, cid)
+            base_r = math.hypot(float(cur[0]) - mx, float(cur[1]) - my)
+        if base_r > max_base_r:
+            self._pub_status(
+                f"PICK_ABORT FAR_BEFORE_ARM r={base_r:.2f}>{max_base_r:.2f}m "
+                f"— 离得远不夹"
+            )
+            return False
+        self._pub_status(f"PICK_RANGE_OK r={base_r:.2f}≤{max_base_r:.2f} → 下探")
 
         # 清掉上次残留吸附，否则一动臂块就会跟着飞
         self._pub_status(f"DETACH_CLEAR {color}_{cid} (before arm)")
@@ -1226,7 +1256,27 @@ class TaskStateMachine(Node):
             return False
         time.sleep(0.02)
 
-        # 臂到位后再吸附（失败也继续抬臂去放置区）
+        # 臂到位后：EE 离块仍远则禁止 ATTACH（防拽飞）
+        stamp = self.get_clock().now().to_msg()
+        km = known_cube_pose_arm_raw(self.motion.tf_buffer, color, cid, stamp)
+        max_ee = float(self.get_parameter("attach_max_dist").value)
+        if km.ok and km.estimate is not None:
+            dist = ee_to_pose_distance_m(
+                self.motion.tf_buffer, km.estimate.pose_arm
+            )
+            if dist is not None and float(dist) > max_ee:
+                self._pub_status(
+                    f"PICK_ABORT EE_FAR {dist:.3f}>{max_ee:.3f}m — 不吸附"
+                )
+                try:
+                    self.motion.arm_home()
+                except Exception:  # noqa: BLE001
+                    pass
+                return False
+            if dist is not None:
+                self._pub_status(f"EE_OK dist={dist:.3f}≤{max_ee:.3f}")
+
+        # 臂到位后再吸附
         script = os.path.join(
             os.path.expanduser("~/dev_ws/yzbot/src"), "cube_control.sh"
         )
@@ -1250,9 +1300,12 @@ class TaskStateMachine(Node):
         if ok:
             self._pub_status(f"MTC_ATTACH_OK {color}_{cid}")
         else:
-            self._pub_status(
-                f"ATTACH_SOFT_FAIL {color}_{cid} → 仍抬臂去放置区"
-            )
+            self._pub_status(f"ATTACH_FAIL {color}_{cid} → 收臂跳过")
+            try:
+                self.motion.arm_home()
+            except Exception:  # noqa: BLE001
+                pass
+            return False
         time.sleep(0.02)
 
         # 抬起带走（先离地再收，避免卡在下探姿态）
@@ -1263,7 +1316,7 @@ class TaskStateMachine(Node):
             self._pub_status("MTC_LIFT_OK")
         self.motion.stop_chassis()
         time.sleep(0.02)
-        return True  # 不管夹没夹到都去放置区
+        return True
 
     def _place_with_moveit(self, color: str, cid: int) -> bool:
         """放置：快速下探 → 立刻松开 → 马上抬臂（不等待）。"""
@@ -1655,40 +1708,46 @@ class TaskStateMachine(Node):
                                 )
 
                     # ALL cubes: never arm-down while base is still far
-                    # blue#4/#5: keep a bit farther until last creep (avoid under-chassis)
+                    # 「看见」≠够近：远处色块也能进 FOV，必须 r 到位才夹
                     pick_r = float(reach_r)
                     if str(color).lower() == "blue" and int(cid) in (4, 5):
                         pick_r = max(pick_r, 0.46)
+                    # 硬门限：超过此距离禁止下探（短于旧 +0.28，不靠「看见」放行）
+                    max_pick_r = pick_r + 0.10
                     info_r = _cube_r()
-                    if info_r is not None and info_r > pick_r + 0.12:
+                    if info_r is not None and info_r > pick_r + 0.06:
                         self._pub_status(
                             f"PRE_PICK_CREEP {color}_{cid} "
-                            f"r={info_r:.2f}m → ≤{pick_r:.2f}m"
+                            f"r={info_r:.2f}m → ≤{pick_r:.2f}m（快贴）"
                         )
+                        # 短快一次，不拖长时间
                         self.motion.creep_to_known_cube(
                             color,
                             cid,
                             target_range=pick_r,
-                            max_vx=0.12,
-                            max_wz=0.18,
-                            timeout=6.5,
+                            max_vx=0.20,
+                            max_wz=0.20,
+                            timeout=3.2,
                         )
                         _unbury_if_under()
                         info_r = _cube_r()
                     if info_r is not None:
                         self._pub_status(
                             f"PRE_PICK_R {color}_{cid} r={info_r:.2f}m "
-                            f"see={_see_now()}"
+                            f"need≤{max_pick_r:.2f} see={_see_now()}"
                         )
 
-                    # Gate: if still far AND never seeing cube → abort (avoid empty grasp)
+                    # Hard gate: still far → abort（看见也不能夹，防远处吸附拽块）
                     info_r = _cube_r()
-                    sees = _see_now()
-                    too_far = info_r is not None and info_r > float(reach_r) + 0.28
-                    if too_far and not sees:
+                    if info_r is None:
                         self._pub_status(
-                            f"PICK_ABORT NO_SEE_FAR {color}_{cid} "
-                            f"r={info_r:.2f}m — 不空夹"
+                            f"PICK_ABORT NO_RANGE {color}_{cid} — 不空夹"
+                        )
+                        aligned = False
+                    elif float(info_r) > float(max_pick_r):
+                        self._pub_status(
+                            f"PICK_ABORT STILL_FAR {color}_{cid} "
+                            f"r={info_r:.2f}>{max_pick_r:.2f}m — 不空夹"
                         )
                         aligned = False
                     else:

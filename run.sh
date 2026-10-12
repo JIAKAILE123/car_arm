@@ -15,6 +15,8 @@ fi
 SHOW_ELAPSED="${SHOW_ELAPSED:-true}"
 # 出题终端默认开启；需在该终端按【空格】才出题
 RUN_EXAM="${RUN_EXAM:-true}"
+# official=官方2题bin；practice=多套练习库(feed)；robot=直接发task_command测路径
+EXAM_BANK="${EXAM_BANK:-official}"
 
 # 每个终端先甩掉 conda，强制用系统 Python3.10（ROS Humble 需要；否则会报没有 numpy）
 ros_env() {
@@ -84,7 +86,17 @@ echo "等待 llm_solver …"; sleep 3
 
 # ⑥ 出题：等栈起来后开终端，按空格才出题
 if [[ "${RUN_EXAM}" == "true" ]]; then
-  open_tab "6-Exam" "ros2 run yzbot_task exam_feeder --ros-args -p auto_once:=false"
+  case "${EXAM_BANK}" in
+    practice|bank|multi)
+      open_tab "6-Exam" "ros2 run yzbot_task practice_exam --ros-args -p mode:=feed"
+      ;;
+    robot|cmd|commands)
+      open_tab "6-Exam" "ros2 run yzbot_task practice_exam --ros-args -p mode:=robot"
+      ;;
+    *)
+      open_tab "6-Exam" "ros2 run yzbot_task exam_feeder --ros-args -p auto_once:=false"
+      ;;
+  esac
 fi
 
 sleep 2
@@ -101,7 +113,10 @@ echo "  1) Nav2 的 RViz 里点一次「2D Pose Estimate」对准车位"
 echo "  2) coStudio → 打开连接 → ws://127.0.0.1:21274"
 echo "  3) 导入布局：${COSTUDIO_LAYOUT}"
 echo "  4) 切到「6-Exam」终端，按【空格】出题"
+echo "     多套练习：EXAM_BANK=practice ./run.sh"
+echo "     只测取放路径：EXAM_BANK=robot ./run.sh"
+echo "     只验解题：ros2 run yzbot_task practice_exam --ros-args -p mode:=check -p backend:=local"
 echo
 echo "清场（卡住时）："
-echo "  killall -9 gzserver gzclient 2>/dev/null; pkill -9 -f 'ros2 launch|task_sm|llm_solver|viz_bridge|rosbridge|nav2|amcl|exam_feeder' 2>/dev/null"
+echo "  killall -9 gzserver gzclient 2>/dev/null; pkill -9 -f 'ros2 launch|task_sm|llm_solver|viz_bridge|rosbridge|nav2|amcl|exam_feeder|practice_exam' 2>/dev/null"
 echo

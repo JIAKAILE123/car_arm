@@ -111,11 +111,11 @@ controller_server:
       decel_lim_x: -1.70
       decel_lim_y: 0.0
       decel_lim_theta: -0.95
-      vx_samples: 16
+      vx_samples: 18
       vy_samples: 1
-      vtheta_samples: 18
-      # 稍加前瞻，动态障碍更早绕开（不改到点容差，避免又爬行）
-      sim_time: 1.7
+      vtheta_samples: 20
+      # 更长前瞻：对向移动障碍时提前改道（不改到点容差）
+      sim_time: 2.2
       sim_granularity: 0.05
       angular_sim_granularity: 0.08
       xy_goal_tolerance: 0.34
@@ -131,8 +131,8 @@ controller_server:
         enabled: true
       BaseObstacle:
         enabled: true
-        # 避障打分略加重，缓解蹭到 dyn_obs
-        scale: 34.0
+        # 避障打分加重，缓解与 dyn_obs 对向相撞
+        scale: 42.0
       GoalAlign:
         enabled: true
         scale: 3.5
@@ -151,14 +151,14 @@ local_costmap:
   local_costmap:
     ros__parameters:
       use_sim_time: True
-      # 动态障碍刷新稍勤，避障更跟得上（不改膨胀半径大跳）
-      update_frequency: 7.0
+      # 动态障碍刷新更勤 + 窗口略大，早看见对向杆
+      update_frequency: 10.0
       publish_frequency: 2.0
       global_frame: odom
       robot_base_frame: base_footprint
       rolling_window: true
-      width: 3
-      height: 3
+      width: 4
+      height: 4
       resolution: 0.07
       footprint: "[[0.38, 0.40], [0.38, -0.40], [-0.36, -0.40], [-0.36, 0.40]]"
       footprint_padding: 0.03
@@ -166,8 +166,8 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         # 略低 → 障碍附近代价衰减慢一点，绕开更早
-        cost_scaling_factor: 2.5
-        inflation_radius: 0.55
+        cost_scaling_factor: 2.3
+        inflation_radius: 0.58
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -175,7 +175,7 @@ local_costmap:
         observation_persistence: 0.0
         expected_update_rate: 0.0
         combination_method: 1
-        observation_sources: scan zone_keepout
+        observation_sources: scan zone_keepout dyn_obs_predict
         scan:
           topic: /scan
           max_obstacle_height: 2.0
@@ -199,6 +199,18 @@ local_costmap:
           raytrace_max_range: 0.0
           raytrace_min_range: 0.0
           observation_persistence: 4.0
+        # Short-horizon predicted bars (dyn_obs_predict node)
+        dyn_obs_predict:
+          topic: /yzbot/dyn_obs_predict
+          max_obstacle_height: 2.0
+          clearing: False
+          marking: True
+          data_type: "PointCloud2"
+          obstacle_max_range: 100.0
+          obstacle_min_range: 0.0
+          raytrace_max_range: 0.0
+          raytrace_min_range: 0.0
+          observation_persistence: 0.45
       denoise_layer:
         plugin: "nav2_costmap_2d::DenoiseLayer"
         enabled: True
@@ -211,8 +223,8 @@ global_costmap:
   global_costmap:
     ros__parameters:
       use_sim_time: True
-      update_frequency: 1.0
-      publish_frequency: 0.5
+      update_frequency: 2.0
+      publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_footprint
       footprint: "[[0.38, 0.40], [0.38, -0.40], [-0.36, -0.40], [-0.36, 0.40]]"
@@ -227,7 +239,7 @@ global_costmap:
         observation_persistence: 0.0
         expected_update_rate: 0.0
         combination_method: 1
-        observation_sources: scan zone_keepout
+        observation_sources: scan zone_keepout dyn_obs_predict
         scan:
           topic: /scan
           max_obstacle_height: 2.0
@@ -250,6 +262,17 @@ global_costmap:
           raytrace_max_range: 0.0
           raytrace_min_range: 0.0
           observation_persistence: 4.0
+        dyn_obs_predict:
+          topic: /yzbot/dyn_obs_predict
+          max_obstacle_height: 2.0
+          clearing: False
+          marking: True
+          data_type: "PointCloud2"
+          obstacle_max_range: 100.0
+          obstacle_min_range: 0.0
+          raytrace_max_range: 0.0
+          raytrace_min_range: 0.0
+          observation_persistence: 0.45
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -374,7 +397,8 @@ collision_monitor:
     polygons: ["PolygonStop", "PolygonCrawl"]
     PolygonStop:
       type: "circle"
-      radius: 0.40
+      # 对向接近时更早刹停，让 Nav2 重规划绕开
+      radius: 0.52
       action_type: "stop"
       min_points: 3
       visualize: False
@@ -382,11 +406,11 @@ collision_monitor:
       enabled: True
     PolygonCrawl:
       type: "circle"
-      # 慢行圈再小、保留速度再高一点
-      radius: 0.44
+      radius: 0.62
       action_type: "slowdown"
-      min_points: 4
-      slowdown_ratio: 0.68
+      min_points: 3
+      # 靠近动态杆时略减速（平时不触发则不影响全程速度）
+      slowdown_ratio: 0.50
       visualize: False
       polygon_pub_topic: "polygon_crawl"
       enabled: True

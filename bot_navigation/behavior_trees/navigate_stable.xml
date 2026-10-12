@@ -1,11 +1,12 @@
 <!--
-  Smooth drive + dyn_obs: replan ~1.2 Hz; on stuck STOP → brief wait → backup → clear → replan.
+  Smooth drive + dyn_obs: replan ~2.0 Hz; on stuck STOP → brief wait → backup → clear → replan.
 -->
 <root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
     <RecoveryNode number_of_retries="12" name="NavigateRecovery">
       <PipelineSequence name="NavigateWithReplanning">
-        <RateController hz="1.2">
+        <!-- 更快重规划：障碍杆横移后路径及时改道，减少对向相撞 -->
+        <RateController hz="2.0">
           <RecoveryNode number_of_retries="2" name="ComputePathToPose">
             <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
             <ClearEntireCostmap name="ClearGlobal" service_name="global_costmap/clear_entirely_global_costmap"/>
@@ -16,10 +17,10 @@
           <FollowPath path="{path}" controller_id="FollowPath"/>
           <Sequence name="UnstickLocal">
             <!-- About to hit / stuck: stop (no cmd), wait, back off, clear, replan -->
-            <Wait wait_duration="0.55"/>
-            <BackUp backup_dist="0.25" backup_speed="0.08"/>
+            <Wait wait_duration="0.40"/>
+            <BackUp backup_dist="0.28" backup_speed="0.12"/>
             <ClearEntireCostmap name="ClearLocal" service_name="local_costmap/clear_entirely_local_costmap"/>
-            <Wait wait_duration="0.35"/>
+            <Wait wait_duration="0.25"/>
           </Sequence>
         </RecoveryNode>
       </PipelineSequence>

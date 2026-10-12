@@ -69,6 +69,14 @@ def generate_launch_description():
             output='screen',
             parameters=[raw_params, {'use_sim_time': use_sim_time}],
         ),
+        # Predict dyn_obs short horizon into costmap (avoid meet-in-the-middle hits)
+        Node(
+            package='yzbot_task',
+            executable='dyn_obs_predict',
+            name='dyn_obs_predict',
+            output='screen',
+            parameters=[{'use_sim_time': use_sim_time}],
+        ),
         Node(
             package='rviz2',
             executable='rviz2',
