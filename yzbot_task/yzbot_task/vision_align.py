@@ -51,8 +51,8 @@ def _hsv_mask(hsv: np.ndarray, color: str) -> np.ndarray:
         m2 = cv2.inRange(hsv, (170, 145, 85), (180, 255, 255))
         return cv2.bitwise_or(m1, m2)
     if c == "blue":
-        # Narrow hue + high S → pure blue cube; reject sky/panel blues
-        return cv2.inRange(hsv, (100, 130, 70), (125, 255, 255))
+        # Slightly wider hue/S so distant floor blues still register
+        return cv2.inRange(hsv, (95, 100, 55), (130, 255, 255))
     raise ValueError(f"unsupported color: {color}")
 
 

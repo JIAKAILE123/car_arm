@@ -19,10 +19,10 @@ amcl:
     laser_max_range: 12.0
     laser_min_range: 0.3
     laser_model_type: "likelihood_field"
-    max_beams: 40
-    # USB / low-CPU: fewer particles
-    max_particles: 500
-    min_particles: 150
+    max_beams: 48
+    # 性能微调：粒子略增；更新阈值保持原值（过勤会抖、到处转）
+    max_particles: 700
+    min_particles: 200
     odom_frame_id: "odom"
     pf_err: 0.05
     pf_z: 0.99
@@ -90,52 +90,55 @@ controller_server:
     general_goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.30
-      yaw_goal_tolerance: 0.35
+      xy_goal_tolerance: 0.32
+      yaw_goal_tolerance: 0.40
 
-    # Faster forward, gentle accel; keep yaw slow → AMCL stable
+    # Line speed kept; yaw slowed — fast spin was skewing Nav / AMCL
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
       debug_trajectory_details: False
       min_vel_x: 0.0
       min_vel_y: 0.0
-      max_vel_x: 1.05
+      max_vel_x: 1.35
       max_vel_y: 0.0
-      max_vel_theta: 0.90
+      max_vel_theta: 0.80
       min_speed_xy: 0.0
-      max_speed_xy: 1.05
+      max_speed_xy: 1.35
       min_speed_theta: 0.0
-      acc_lim_x: 1.4
+      acc_lim_x: 1.70
       acc_lim_y: 0.0
-      acc_lim_theta: 1.15
-      decel_lim_x: -1.4
+      acc_lim_theta: 0.95
+      decel_lim_x: -1.70
       decel_lim_y: 0.0
-      decel_lim_theta: -1.15
-      vx_samples: 14
+      decel_lim_theta: -0.95
+      vx_samples: 16
       vy_samples: 1
-      vtheta_samples: 16
-      sim_time: 1.8
+      vtheta_samples: 18
+      # 稍加前瞻，动态障碍更早绕开（不改到点容差，避免又爬行）
+      sim_time: 1.7
       sim_granularity: 0.05
       angular_sim_granularity: 0.08
-      xy_goal_tolerance: 0.30
-      yaw_goal_tolerance: 0.35
+      xy_goal_tolerance: 0.34
+      yaw_goal_tolerance: 0.32
       transform_tolerance: 0.3
       critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
       RotateToGoal:
         enabled: true
         scale: 2.5
-        slowing_factor: 10.0
+        # 到点前减速段再缩短一点
+        slowing_factor: 5.5
       Oscillation:
         enabled: true
       BaseObstacle:
         enabled: true
-        scale: 28.0
+        # 避障打分略加重，缓解蹭到 dyn_obs
+        scale: 34.0
       GoalAlign:
         enabled: true
         scale: 3.5
       PathAlign:
         enabled: true
-        scale: 16.0
+        scale: 18.0
       PathDist:
         enabled: true
         scale: 20.0
@@ -148,22 +151,23 @@ local_costmap:
   local_costmap:
     ros__parameters:
       use_sim_time: True
-      # Slightly higher for dyn_obs (was 4 Hz); rest unchanged
-      update_frequency: 5.0
-      publish_frequency: 1.0
+      # 动态障碍刷新稍勤，避障更跟得上（不改膨胀半径大跳）
+      update_frequency: 7.0
+      publish_frequency: 2.0
       global_frame: odom
       robot_base_frame: base_footprint
       rolling_window: true
       width: 3
       height: 3
-      resolution: 0.08
+      resolution: 0.07
       footprint: "[[0.38, 0.40], [0.38, -0.40], [-0.36, -0.40], [-0.36, 0.40]]"
-      footprint_padding: 0.02
+      footprint_padding: 0.03
       plugins: ["obstacle_layer", "denoise_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 2.8
-        inflation_radius: 0.48
+        # 略低 → 障碍附近代价衰减慢一点，绕开更早
+        cost_scaling_factor: 2.5
+        inflation_radius: 0.55
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -194,7 +198,7 @@ local_costmap:
           obstacle_min_range: 0.0
           raytrace_max_range: 0.0
           raytrace_min_range: 0.0
-          observation_persistence: 1.2
+          observation_persistence: 4.0
       denoise_layer:
         plugin: "nav2_costmap_2d::DenoiseLayer"
         enabled: True
@@ -245,7 +249,7 @@ global_costmap:
           obstacle_min_range: 0.0
           raytrace_max_range: 0.0
           raytrace_min_range: 0.0
-          observation_persistence: 1.2
+          observation_persistence: 4.0
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -257,7 +261,7 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 2.8
-        inflation_radius: 0.48
+        inflation_radius: 0.55
       always_send_full_costmap: False
 
 map_server:
@@ -345,10 +349,10 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [1.05, 0.0, 0.90]
-    min_velocity: [-0.50, 0.0, -0.90]
-    max_accel: [1.15, 0.0, 1.00]
-    max_decel: [-1.35, 0.0, -1.00]
+    max_velocity: [1.35, 0.0, 0.80]
+    min_velocity: [-0.55, 0.0, -0.80]
+    max_accel: [1.40, 0.0, 0.90]
+    max_decel: [-1.60, 0.0, -0.90]
     odom_topic: "odometry/filtered"
     odom_duration: 0.12
     deadband_velocity: [0.0, 0.0, 0.0]
@@ -378,10 +382,11 @@ collision_monitor:
       enabled: True
     PolygonCrawl:
       type: "circle"
-      radius: 0.58
+      # 慢行圈再小、保留速度再高一点
+      radius: 0.44
       action_type: "slowdown"
       min_points: 4
-      slowdown_ratio: 0.35
+      slowdown_ratio: 0.68
       visualize: False
       polygon_pub_topic: "polygon_crawl"
       enabled: True

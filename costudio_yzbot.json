@@ -345,7 +345,7 @@
     "Indicator!3c2k9pj": {
       "path": "/color.data",
       "style": "bulb",
-      "fontSize": 36,
+      "fontSize": 40,
       "fallbackColor": "#a0a0a0",
       "fallbackLabel": "待命",
       "rules": [
@@ -367,7 +367,7 @@
     "Indicator!s4663u": {
       "path": "/task.data",
       "style": "background",
-      "fontSize": 36,
+      "fontSize": 40,
       "fallbackColor": "#d6f2cf",
       "fallbackLabel": "待命",
       "rules": [
@@ -389,7 +389,7 @@
     "Indicator!2lw9qd9": {
       "path": "/pick.data",
       "style": "background",
-      "fontSize": 36,
+      "fontSize": 40,
       "fallbackColor": "#80c9d2",
       "fallbackLabel": "待命",
       "rules": [
@@ -411,7 +411,7 @@
     "Indicator!3cv0og": {
       "path": "/cur.data",
       "style": "background",
-      "fontSize": 36,
+      "fontSize": 40,
       "fallbackColor": "#adb2d6",
       "fallbackLabel": "系统待机",
       "rules": [
@@ -447,8 +447,8 @@
       "diffMethod": "custom",
       "diffTopicPath": "",
       "showFullMessageForDiff": false,
-      "topicPath": "/chat",
-      "fontSize": 14,
+      "topicPath": "/chat.data",
+      "fontSize": 24,
       "foxglovePanelTitle": "任务总览"
     },
     "RawMessages!viz_q": {
@@ -456,8 +456,8 @@
       "diffMethod": "custom",
       "diffTopicPath": "",
       "showFullMessageForDiff": false,
-      "topicPath": "/viz/question",
-      "fontSize": 14,
+      "topicPath": "/viz/question.data",
+      "fontSize": 26,
       "foxglovePanelTitle": "任务题目"
     },
     "RawMessages!viz_c": {
@@ -465,8 +465,8 @@
       "diffMethod": "custom",
       "diffTopicPath": "",
       "showFullMessageForDiff": false,
-      "topicPath": "/viz/counts",
-      "fontSize": 14,
+      "topicPath": "/viz/counts.data",
+      "fontSize": 26,
       "foxglovePanelTitle": "资源数量"
     },
     "RawMessages!viz_o": {
@@ -474,8 +474,8 @@
       "diffMethod": "custom",
       "diffTopicPath": "",
       "showFullMessageForDiff": false,
-      "topicPath": "/viz/grasp_order",
-      "fontSize": 14,
+      "topicPath": "/viz/grasp_order.data",
+      "fontSize": 24,
       "foxglovePanelTitle": "抓取顺序"
     },
     "RawMessages!viz_p": {
@@ -483,8 +483,8 @@
       "diffMethod": "custom",
       "diffTopicPath": "",
       "showFullMessageForDiff": false,
-      "topicPath": "/viz/progress",
-      "fontSize": 14,
+      "topicPath": "/viz/progress.data",
+      "fontSize": 24,
       "foxglovePanelTitle": "任务进度"
     },
     "RawMessages!viz_w": {
@@ -492,8 +492,8 @@
       "diffMethod": "custom",
       "diffTopicPath": "",
       "showFullMessageForDiff": false,
-      "topicPath": "/viz/work_state",
-      "fontSize": 14,
+      "topicPath": "/viz/work_state.data",
+      "fontSize": 24,
       "foxglovePanelTitle": "工作状态"
     },
     "RawMessages!viz_t": {
@@ -501,8 +501,8 @@
       "diffMethod": "custom",
       "diffTopicPath": "",
       "showFullMessageForDiff": false,
-      "topicPath": "/viz/elapsed",
-      "fontSize": 18,
+      "topicPath": "/viz/elapsed.data",
+      "fontSize": 28,
       "foxglovePanelTitle": "【测试】总用时"
     }
   },

@@ -1619,10 +1619,10 @@
         </link>
       </model>
       <model name='blue_cube_5'>
-      <pose>0.541303 -11.223000 0.015 0 -0 0</pose>
+      <pose>1.000000 -10.800000 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>0.541303 -11.223000 0.015 0 -0 0</pose>
+          <pose>1.000000 -10.800000 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
@@ -2561,7 +2561,7 @@
       </link>
     </model>
     <model name='blue_cube_5'>
-      <pose>0.541303 -11.223000 0.015 0 -0 0</pose>
+      <pose>1.000000 -10.800000 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
           <mass>0.15</mass>
@@ -4108,8 +4108,10 @@
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
-              <name>Gazebo/Grey</name>
+              <name>Gazebo/Purple</name>
             </script>
+            <ambient>0.55 0.15 0.75 1</ambient>
+            <diffuse>0.65 0.20 0.90 1</diffuse>
           </material>
         </visual>
         <self_collide>0</self_collide>
@@ -4137,8 +4139,10 @@
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
-              <name>Gazebo/Grey</name>
+              <name>Gazebo/Purple</name>
             </script>
+            <ambient>0.55 0.15 0.75 1</ambient>
+            <diffuse>0.65 0.20 0.90 1</diffuse>
           </material>
         </visual>
         <self_collide>0</self_collide>

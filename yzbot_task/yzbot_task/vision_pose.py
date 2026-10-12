@@ -378,7 +378,24 @@ def approach_xy_for_cube(
 
     if str(color).lower() == "blue":
         # Farther park so Nav2 / creep do not sit on the cube (FOV miss).
-        so_b = max(so, 0.65)
+        so_b = max(so, 0.60)
+        cid = int(cube_id)
+
+        # blue#5 southern corridor. Park NORTH (farther) face south — never drive
+        # over the cube (under-chassis FOV miss). Leave space to reverse after pick.
+        if cid == 5:
+            so5 = max(so_b, 0.72)
+            ax, ay = float(cx), float(cy) + so5
+            return ax, ay, _face(ax, ay)
+
+        # blue#4 at (2.2,-5.1) SE of zone B. South park forces a path that
+        # crosses the cube (from B) → cube ends under the chassis / FOV dead.
+        # Always park WEST, face +X — approach from B goes south, cube stays ahead.
+        if cid == 4:
+            so4 = max(so_b, 0.70)
+            ax, ay = float(cx) - so4, float(cy)
+            return ax, ay, _face(ax, ay)
+
         # Park on the SAME side of the cube as the robot — never force west
         # when the car is east (that path drives over the block).
         if robot_xy is not None:
@@ -387,7 +404,7 @@ def approach_xy_for_cube(
                 ax, ay = float(cx + so_b), float(cy)  # east, face −X
             else:
                 ax, ay = float(cx - so_b), float(cy)  # west, face +X
-        elif int(cube_id) == 2:
+        elif cid == 2:
             ax, ay = float(cx + so_b), float(cy)
         else:
             ax, ay = float(cx - so_b), float(cy)
@@ -396,9 +413,21 @@ def approach_xy_for_cube(
     # Red: ALWAYS park on the robot's side (never cross over the cube).
     # Prefer ±X (side) docks — N/S parks often sit in the lower dyn_obs lane
     # and the first-red approach from start then never puts the cube in FOV.
-    so_r = max(so, 0.58)
-    if int(cube_id) in (2, 3, 4):
-        so_r = max(so_r, 0.62)
+    # All reds use the same standoff (no 0.70 special — that caused far-grab).
+    so_r = max(float(standoff_m), 0.55)
+    cid = int(cube_id)
+
+    # red#2 at (0,-4.2) sits next to zone B (1.5,-4). East park lands in B
+    # keepout/inflation → Nav stops wrong / cam misses. Always park WEST.
+    if cid == 2:
+        ax, ay = float(cx) - so_r, float(cy)
+        return ax, ay, _face(ax, ay)
+
+    # red#4 leftmost (x≈-4.7): west park hugs wall → FOV drift. Always park EAST.
+    # Same distance as others (was 0.70 → “离很远才夹”).
+    if cid == 4:
+        ax, ay = float(cx) + so_r, float(cy)
+        return ax, ay, _face(ax, ay)
 
     if robot_xy is None:
         ax, ay = float(cx + so_r), float(cy)
@@ -502,7 +531,8 @@ _KNOWN_CUBES = {
     # Was (-4.0,-0.4) in doorway — open corridor
     ("blue", 3): (-2.50, -1.80, 0.015),
     ("blue", 4): (2.20, -5.10, 0.015),
-    ("blue", 5): (0.541303, -11.223000, 0.015),
+    # Was (0.54,-11.22) against south wall — then -9.80; user: y-=1 → -10.80
+    ("blue", 5): (1.00, -10.80, 0.015),
 }
 
 def known_cube_xy(color: str, cube_id: int):

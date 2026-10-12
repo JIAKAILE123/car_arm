@@ -1,66 +1,31 @@
 # car_arm / yzbot — 大模型技术创新赛
 
----
-
-## 比赛走一遍（按顺序开终端）
-
-**每个新终端先执行这两行：**
-
-```bash
-source /opt/ros/humble/setup.bash
-source ~/dev_ws/yzbot/install/setup.bash
-```
-
-然后按下面开（共 6 个终端）：
-
-```bash
-# ① Gazebo
-ros2 launch mybot gazebo_world2.launch.py
-
-# ② Nav2（起来后在 RViz 点一次 2D Pose Estimate）
-ros2 launch bot_navigation nav_bringup_gazebo2.launch.py
-
-# ③ coStudio 转发（测试阶段带总用时；正式比赛加 show_elapsed:=false）
-# cobridge：优先用系统包；没有则用仓库内 third_party/cobridge_ros（已随仓库提供）
-# 可选系统安装：sudo apt install ros-humble-cobridge（需先加 apt.coscene.cn 源）
-ros2 launch yzbot_task rosbridge_viz.launch.py
-# 打开 coStudio：/opt/coStudio/honeybee
-# 打开连接 → ws://127.0.0.1:21274（不要用 9090）
-# 导入布局：~/dev_ws/yzbot/src/costudio_yzbot.json
-# 右侧 /viz/* 红字 = viz_bridge 没在发；确认本终端 launch 里有 viz_bridge ready
-
-# ④ 任务状态机
-ros2 run yzbot_task task_sm
-
-# ⑤ 大模型解题
-ros2 run yzbot_task llm_solver
-
-# ⑥ 官方出题（跑一次就出题；也可反复再跑）
-ros2 run yzbot_task exam_feeder
-```
-
-到这里：出题 → DeepSeek 解题 → `/task_command` → `task_sm` 抓放；coStudio 上看题目/数量/顺序/状态。
+技术文档：[`docs/技术文档.md`](docs/技术文档.md)
 
 ---
 
-## 常用补充
-
-**手动发一题 / 发任务（调试）：**
+## 一键启动
 
 ```bash
-ros2 topic pub --once /exam_question std_msgs/msg/String \
-  "{data: '题目: 每个衣柜有5件衣物;有T恤、裤子两种衣柜;小美需要2件T恤,1条裤子;小帅、小丽都需要7件T恤;小娜需要2件T恤,1条裤子;小杰需要1条裤子。设T恤衣柜数量为x,裤子衣柜数量为y,计算x、y分别为多少。'}"
-
-ros2 topic pub --once /task_command std_msgs/msg/String "{data: '[red,1,A]'}"
+cd ~/dev_ws/yzbot
+./run.sh
 ```
 
-**赛前多测解题（12 题，本地+DeepSeek）：**
+会自动打开多个终端：Gazebo、Nav2、coStudio 转发、task_sm、llm_solver、出题，并尝试启动 coStudio。  
+`run.sh` 会自动避开 conda，改用系统 `/usr/bin/python3`（否则常见 `No module named 'numpy'`，小车也 spawn 不出来）。
 
-```bash
-ros2 run yzbot_task practice_exam --ros-args -p backend:=both
-```
+启动后：
+1. Nav2 的 RViz 里点一次 **2D Pose Estimate**
+2. coStudio → 打开连接 → `ws://127.0.0.1:21274`
+3. 导入布局：`~/dev_ws/yzbot/src/costudio_yzbot.json`（桌面也有一份）
+4. 切到 **6-Exam** 终端，按 **空格** 出题（可多次）
 
-**改代码后编译：**
+正式比赛隐藏总用时：`SHOW_ELAPSED=false ./run.sh`  
+不开出题终端：`RUN_EXAM=false ./run.sh`
+
+---
+
+## 改代码后编译
 
 ```bash
 cd ~/dev_ws/yzbot
@@ -68,21 +33,19 @@ colcon build --packages-select yzbot_task mybot mybot_description bot_navigation
 source install/setup.bash
 ```
 
-**DeepSeek 密钥（只需配一次）：**
+## DeepSeek 密钥（只需配一次）
 
 ```bash
 mkdir -p ~/.config/yzbot
 echo 'sk-你的密钥' > ~/.config/yzbot/deepseek_api_key
 ```
 
-**卡住时清进程：**
+## 卡住时清进程
 
 ```bash
 killall -9 gzserver gzclient 2>/dev/null
 pkill -9 -f 'ros2 launch|task_sm|llm_solver|viz_bridge|rosbridge|nav2|amcl' 2>/dev/null
 ```
-
----
 
 ## 话题速查
 

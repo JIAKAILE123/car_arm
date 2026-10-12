@@ -2,7 +2,12 @@ import os
 import re
 from ament_index_python.packages import get_package_prefix
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, RegisterEventHandler, SetEnvironmentVariable
+from launch.actions import (
+    ExecuteProcess,
+    RegisterEventHandler,
+    SetEnvironmentVariable,
+    TimerAction,
+)
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from launch.event_handlers import OnProcessExit
@@ -78,17 +83,20 @@ def generate_launch_description():
         output='screen'
     )
 
-    # 在 Gazebo 中生成机器人（通过 robot_description 话题）
+    # 在 Gazebo 中生成机器人（等世界加载后再 spawn，避免小车丢失）
     spawn_entity_cmd = Node(
         package='gazebo_ros',
         executable='spawn_entity.py',
         arguments=[
             '-entity', robot_name_in_model,
             '-topic', 'robot_description',
-            '-x', '0.0', '-y', '0.0', '-z', '0.0', '-Y', '0.0'
+            '-timeout', '180.0',
+            '-x', '0.0', '-y', '0.0', '-z', '0.05', '-Y', '0.0'
         ],
         output='screen'
     )
+    # offic_room 较大，立即 spawn 常失败；延迟几秒等 /spawn_entity 就绪
+    delayed_spawn = TimerAction(period=8.0, actions=[spawn_entity_cmd])
 
     # ========== 使用 spawner 加载控制器（替代 ros2 control 命令） ==========
     # 1. 关节状态广播器
@@ -153,7 +161,7 @@ def generate_launch_description():
     ld.add_action(set_plugin_path)
     ld.add_action(start_gazebo_cmd)
     ld.add_action(node_robot_state_publisher)
-    ld.add_action(spawn_entity_cmd)
+    ld.add_action(delayed_spawn)
     ld.add_action(evt1)
     ld.add_action(evt2)
     ld.add_action(evt3)
