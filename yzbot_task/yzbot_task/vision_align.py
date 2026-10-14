@@ -51,8 +51,8 @@ def _hsv_mask(hsv: np.ndarray, color: str) -> np.ndarray:
         m2 = cv2.inRange(hsv, (170, 145, 85), (180, 255, 255))
         return cv2.bitwise_or(m1, m2)
     if c == "blue":
-        # Slightly wider hue/S so distant floor blues still register
-        return cv2.inRange(hsv, (95, 100, 55), (130, 255, 255))
+        # 远距蓝块 S/V 更低，略放宽
+        return cv2.inRange(hsv, (92, 85, 45), (132, 255, 255))
     raise ValueError(f"unsupported color: {color}")
 
 
@@ -79,7 +79,8 @@ def _cube_like(
     # 3cm cube at ~0.4–1.5m is small; wall patches are huge
     if frac > 0.06:
         return False
-    if area < 14:
+    # 远距小块面积更小，仍须通过（原 14 易漏远处物块）
+    if area < 8:
         return False
     aspect = float(bw) / float(max(bh, 1))
     if aspect < 0.45 or aspect > 2.2:
@@ -102,7 +103,7 @@ def _cube_like(
 def detect_blob(
     bgr: np.ndarray,
     color: str,
-    max_width: int = 320,
+    max_width: int = 480,
     *,
     target_u: float = 0.0,
     target_v: float = 0.35,
@@ -152,8 +153,8 @@ def detect_blob(
 
     best: Optional[BlobResult] = None
     best_score = -1e18
-    # Pure-color floor: require high mean S inside bbox
-    sat_floor = 140.0 if color.lower() == "red" else 125.0
+    # 远距饱和度略降，近距仍靠 area/位置筛墙
+    sat_floor = 125.0 if color.lower() == "red" else 110.0
 
     for cnt in contours:
         area = float(cv2.contourArea(cnt))

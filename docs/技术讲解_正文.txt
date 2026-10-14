@@ -2,7 +2,7 @@
 # 全球校园人工智能算法精英大赛 · 大模型技术创新赛
 
 # 技术文档
-队伍：yzbot / car_arm　　平台：ROS2 Humble + Gazebo + Nav2 + OpenCV + DeepSeek　　日期：2026-09-23
+参赛作品名：快速且稳定车　　工程仓库：yzbot / car_arm　　平台：ROS2 Humble + Gazebo + Nav2 + OpenCV + DeepSeek　　日期：2026-10-14
 
 # 1 系统架构
 系统按控制层级分为四段：指令层将自然语言映射为结构化任务 [颜色, 数量, 投放区]；任务层由 route_planner 选择物块编号与执行顺序；导航层使用 Nav2（AMCL + Navfn + DWB）完成局间转移；作业层在近场用 OpenCV HSV 视觉伺服对准后吸附，并按区心内收对接投放。

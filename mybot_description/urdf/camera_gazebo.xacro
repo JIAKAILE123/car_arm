@@ -33,13 +33,13 @@
 
         <gazebo reference="${prefix}_link">
             <sensor type="camera" name="camera_node">
-                <!-- VM 降负载：10Hz + 稍后视觉侧再缩到 320 宽 -->
-                <update_rate>10.0</update_rate>
+                <!-- 提高分辨率/帧率，远距小块更好认 -->
+                <update_rate>15.0</update_rate>
                 <camera name="head">
                     <horizontal_fov>1.3962634</horizontal_fov>
                     <image>
-                        <width>640</width>
-                        <height>360</height>
+                        <width>800</width>
+                        <height>450</height>
                         <format>R8G8B8</format>
                     </image>
                     <clip>

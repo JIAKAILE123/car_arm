@@ -71,7 +71,6 @@ bt_navigator:
 controller_server:
   ros__parameters:
     use_sim_time: True
-    # 15 Hz: smooth cmd_vel without full 20 Hz USB load
     controller_frequency: 15.0
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.0
@@ -111,11 +110,11 @@ controller_server:
       decel_lim_x: -1.70
       decel_lim_y: 0.0
       decel_lim_theta: -0.95
-      vx_samples: 18
+      vx_samples: 16
       vy_samples: 1
-      vtheta_samples: 20
-      # 更长前瞻：对向移动障碍时提前改道（不改到点容差）
-      sim_time: 2.2
+      vtheta_samples: 18
+      # 前瞻适中：过长会在远处物块旁误减速爬行
+      sim_time: 1.7
       sim_granularity: 0.05
       angular_sim_granularity: 0.08
       xy_goal_tolerance: 0.34
@@ -125,14 +124,13 @@ controller_server:
       RotateToGoal:
         enabled: true
         scale: 2.5
-        # 到点前减速段再缩短一点
         slowing_factor: 5.5
       Oscillation:
         enabled: true
       BaseObstacle:
         enabled: true
-        # 避障打分加重，缓解与 dyn_obs 对向相撞
-        scale: 42.0
+        # 轻量避障：真近才绕，避免过早爬行
+        scale: 36.0
       GoalAlign:
         enabled: true
         scale: 3.5
@@ -151,23 +149,21 @@ local_costmap:
   local_costmap:
     ros__parameters:
       use_sim_time: True
-      # 动态障碍刷新更勤 + 窗口略大，早看见对向杆
-      update_frequency: 10.0
+      update_frequency: 7.0
       publish_frequency: 2.0
       global_frame: odom
       robot_base_frame: base_footprint
       rolling_window: true
-      width: 4
-      height: 4
+      width: 3
+      height: 3
       resolution: 0.07
       footprint: "[[0.38, 0.40], [0.38, -0.40], [-0.36, -0.40], [-0.36, 0.40]]"
       footprint_padding: 0.03
       plugins: ["obstacle_layer", "denoise_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        # 略低 → 障碍附近代价衰减慢一点，绕开更早
-        cost_scaling_factor: 2.3
-        inflation_radius: 0.58
+        cost_scaling_factor: 2.5
+        inflation_radius: 0.55
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -199,7 +195,7 @@ local_costmap:
           raytrace_max_range: 0.0
           raytrace_min_range: 0.0
           observation_persistence: 4.0
-        # Short-horizon predicted bars (dyn_obs_predict node)
+        # Short-horizon predicted bars (mild persist — avoid far crawl)
         dyn_obs_predict:
           topic: /yzbot/dyn_obs_predict
           max_obstacle_height: 2.0
@@ -210,7 +206,7 @@ local_costmap:
           obstacle_min_range: 0.0
           raytrace_max_range: 0.0
           raytrace_min_range: 0.0
-          observation_persistence: 0.45
+          observation_persistence: 0.30
       denoise_layer:
         plugin: "nav2_costmap_2d::DenoiseLayer"
         enabled: True
@@ -223,8 +219,8 @@ global_costmap:
   global_costmap:
     ros__parameters:
       use_sim_time: True
-      update_frequency: 2.0
-      publish_frequency: 1.0
+      update_frequency: 1.0
+      publish_frequency: 0.5
       global_frame: map
       robot_base_frame: base_footprint
       footprint: "[[0.38, 0.40], [0.38, -0.40], [-0.36, -0.40], [-0.36, 0.40]]"
@@ -272,7 +268,7 @@ global_costmap:
           obstacle_min_range: 0.0
           raytrace_max_range: 0.0
           raytrace_min_range: 0.0
-          observation_persistence: 0.45
+          observation_persistence: 0.30
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -397,8 +393,7 @@ collision_monitor:
     polygons: ["PolygonStop", "PolygonCrawl"]
     PolygonStop:
       type: "circle"
-      # 对向接近时更早刹停，让 Nav2 重规划绕开
-      radius: 0.52
+      radius: 0.40
       action_type: "stop"
       min_points: 3
       visualize: False
@@ -406,11 +401,11 @@ collision_monitor:
       enabled: True
     PolygonCrawl:
       type: "circle"
-      radius: 0.62
+      # 只在真正靠近时慢行，避免远处物块旁爬行
+      radius: 0.46
       action_type: "slowdown"
-      min_points: 3
-      # 靠近动态杆时略减速（平时不触发则不影响全程速度）
-      slowdown_ratio: 0.50
+      min_points: 4
+      slowdown_ratio: 0.65
       visualize: False
       polygon_pub_topic: "polygon_crawl"
       enabled: True

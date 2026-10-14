@@ -519,7 +519,8 @@ class MotionHelpers:
             f"NAV_PLACE zone=({x:.2f},{y:.2f}) park=({gx:.2f},{gy:.2f}) "
             f"behind={so:.2f}m yaw={yaw:.2f} (区心在车前，不压区心)"
         )
-        # Loosen controller yaw tolerance for this leg (restore after)
+        # 软 early：区前膨胀/急停易卡死；到附近后由 PLACE_DOCK 正对+补进
+        soft_early = max(0.18, float(xy_tol))
         old_yaw_tol = self._set_follow_yaw_tol(3.0)
         try:
             ok = self.navigate(
@@ -527,38 +528,46 @@ class MotionHelpers:
                 float(gy),
                 yaw,
                 timeout=timeout,
-                early_xy_tol=float(xy_tol),
+                early_xy_tol=soft_early,
             )
         finally:
             if old_yaw_tol is not None:
                 self._set_follow_yaw_tol(old_yaw_tol)
-        if not ok:
-            return False
         time.sleep(0.04)
         self.stop_chassis()
-        gate_ok, why = self.pose_gate_ok(
-            float(gx), float(gy), yaw, xy_tol=float(xy_tol), yaw_tol=math.pi
+        cur_n = self.get_base_xy_yaw_map()
+        dxy = (
+            math.hypot(float(cur_n[0]) - gx, float(cur_n[1]) - gy)
+            if cur_n is not None
+            else 99.0
         )
-        self.node.get_logger().info(why)
-        if not gate_ok:
-            # One soft retry with same keep-yaw policy
+        if (not ok) or dxy > soft_early * 1.4:
             ok2 = self.navigate(
                 float(gx),
                 float(gy),
                 yaw,
-                timeout=min(48.0, timeout),
-                early_xy_tol=float(xy_tol) * 1.15,
+                timeout=min(40.0, timeout),
+                early_xy_tol=soft_early * 1.15,
             )
-            if not ok2:
-                return False
             time.sleep(0.04)
             self.stop_chassis()
-        # Reanchor at approach XY; keep actual heading
+            cur_n = self.get_base_xy_yaw_map()
+            dxy = (
+                math.hypot(float(cur_n[0]) - gx, float(cur_n[1]) - gy)
+                if cur_n is not None
+                else 99.0
+            )
+            if not ok2 and dxy > 0.55:
+                self.node.get_logger().error(
+                    f"NAV_PLACE too far dxy={dxy:.2f}m"
+                )
+                return False
+        # 稍远也交给 DOCK，避免区前死等
         cur2 = self.get_base_xy_yaw_map()
         use_yaw = float(cur2[2]) if cur2 is not None else yaw
         pin_x = float(cur2[0]) if cur2 is not None else float(gx)
         pin_y = float(cur2[1]) if cur2 is not None else float(gy)
-        self.reanchor_amcl(pin_x, pin_y, use_yaw, settle_sec=0.05)
+        self.reanchor_amcl(pin_x, pin_y, use_yaw, settle_sec=0.03)
         return True
 
     def _set_follow_yaw_tol(self, value: float) -> Optional[float]:

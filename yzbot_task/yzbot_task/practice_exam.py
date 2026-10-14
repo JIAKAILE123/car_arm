@@ -22,11 +22,12 @@
 from __future__ import annotations
 
 import math
+import os
+import random
 import select
 import sys
 import termios
 import tty
-import os
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -258,6 +259,94 @@ def practice_cases() -> List[Case]:
             3,
             "无「都」句，累加正确",
         ),
+        # —— 多把模拟：数量/区组合再铺一层 ——
+        _mk(
+            "sim_red1_blue5",
+            _wardrobe("小明需要3件T恤;小红需要22条裤子。"),
+            3,
+            22,
+            "(1,5) 红C蓝A，蓝偏多",
+        ),
+        _mk(
+            "sim_red5_blue1",
+            _wardrobe("小明需要21件T恤;小红需要2条裤子。"),
+            21,
+            2,
+            "(5,1) 红A蓝C，红偏多",
+        ),
+        _mk(
+            "sim_red5_blue2",
+            _pets("小爱领养22只猫;小欢领养8只狗。"),
+            22,
+            8,
+            "(5,2) 红A蓝C",
+        ),
+        _mk(
+            "sim_red2_blue5",
+            _pets("小爱领养8只猫;小欢领养21只狗。"),
+            8,
+            21,
+            "(2,5) 红C蓝A",
+        ),
+        _mk(
+            "sim_red4_blue4",
+            _wardrobe("小明需要18件T恤,16条裤子。"),
+            18,
+            16,
+            "(4,4) 双 A 中等满载",
+        ),
+        _mk(
+            "sim_red3_blue5",
+            _wardrobe("小一、小二、小三都需要5件T恤;小四需要23条裤子。"),
+            15,
+            23,
+            "(3,5) 红A蓝A",
+        ),
+        _mk(
+            "sim_red5_blue3",
+            _wardrobe("小明需要24件T恤;小红、小蓝都需要7条裤子。"),
+            24,
+            14,
+            "(5,3) 双 A",
+        ),
+        _mk(
+            "sim_red1_blue2",
+            _wardrobe("小美需要2件T恤;小帅需要6条裤子。"),
+            2,
+            6,
+            "(1,2) 双 C 轻量",
+        ),
+        _mk(
+            "sim_red2_blue2",
+            _pets("小花领养6只猫;小草领养9只狗。"),
+            6,
+            9,
+            "(2,2) 双 C",
+        ),
+        _mk(
+            "sim_threshold_red3_blue1",
+            _wardrobe("小明需要13件T恤,1条裤子。"),
+            13,
+            1,
+            "(3,1) 红刚过门槛→A",
+        ),
+        _mk(
+            "sim_dou_4_people",
+            _wardrobe("小A、小B、小C、小D都需要3件T恤;小E需要8条裤子。"),
+            12,
+            8,
+            "3×4=12→3；漏乘会错",
+        ),
+        _mk(
+            "sim_pets_mixed_heavy",
+            _pets(
+                "小爱领养5只猫,4只狗;小宠、小动、小乐都领养3只猫;"
+                "小欢领养6只狗。"
+            ),
+            14,
+            10,
+            "猫5+9=14→3 狗4+6=10→2",
+        ),
     ]
     return cases
 
@@ -301,6 +390,29 @@ def robot_cases() -> List[RobotCase]:
             "[red,1,C;blue,1,C]",
             "最小双色",
         ),
+        # —— 多把：数量梯度 / 跨区 ——
+        RobotCase("R13_red5_C", "[red,5,C]", "5红全进C（同区满）"),
+        RobotCase("R14_blue5_C", "[blue,5,C]", "5蓝全进C"),
+        RobotCase("R15_red5_A", "[red,5,A]", "5红全进A"),
+        RobotCase("R16_blue5_A", "[blue,5,A]", "5蓝全进A"),
+        RobotCase("R17_red1_blue4_CA", "[red,1,C;blue,4,A]", "少红多蓝跨区"),
+        RobotCase("R18_red4_blue1_AC", "[red,4,A;blue,1,C]", "多红少蓝跨区"),
+        RobotCase("R19_red2_blue4_CA", "[red,2,C;blue,4,A]", "红C蓝A 中重"),
+        RobotCase("R20_red4_blue2_AC", "[red,4,A;blue,2,C]", "红A蓝C 中重"),
+        RobotCase("R21_red5_blue1_AC", "[red,5,A;blue,1,C]", "红吃满+1蓝"),
+        RobotCase("R22_red1_blue5_CA", "[red,1,C;blue,5,A]", "蓝吃满+1红"),
+        RobotCase("R23_red2_blue2_AA", "[red,2,A;blue,2,A]", "双色双A（低量）"),
+        RobotCase("R24_red2_blue2_CC", "[red,2,C;blue,2,C]", "双色双C"),
+        RobotCase("R25_red3_blue1_AC", "[red,3,A;blue,1,C]", "门槛红A + 单蓝C"),
+        RobotCase("R26_red1_blue3_CA", "[red,1,C;blue,3,A]", "单红C + 门槛蓝A"),
+        RobotCase("R27_red4_blue4_AA", "[red,4,A;blue,4,A]", "双A 近满载"),
+        RobotCase("R28_red5_blue3_AA", "[red,5,A;blue,3,A]", "红满+蓝3"),
+        RobotCase("R29_red3_blue5_AA", "[red,3,A;blue,5,A]", "蓝满+红3"),
+        RobotCase("R30_blue2_red3", "[blue,2,C;red,3,A]", "蓝前红后解析"),
+        RobotCase("R31_via_B_red", "[red,2,B]", "投放 B 区（路径/停靠）"),
+        RobotCase("R32_via_B_mix", "[red,2,A;blue,2,B]", "A+B 跨区"),
+        RobotCase("R33_B_then_C", "[blue,2,B;red,2,C]", "B+C 跨区"),
+        RobotCase("R34_all_zones", "[red,2,A;blue,2,C]", "经典 AC 对照"),
     ]
 
 
@@ -337,6 +449,8 @@ class PracticeExamNode(Node):
         self.declare_parameter("publish", False)  # check 时是否顺带 pub 题目
         self.declare_parameter("stop_on_fail", True)
         self.declare_parameter("wait_done", False)  # feed/robot：等 DONE 再提示下一题
+        # feed/robot：打乱顺序，模拟多把随机抽题
+        self.declare_parameter("shuffle", True)
         self.q_pub = self.create_publisher(String, "/exam_question", 10)
         self.cmd_pub = self.create_publisher(String, "/task_command", 10)
         self.status_pub = self.create_publisher(String, "/task_status", 10)
@@ -453,8 +567,15 @@ class PracticeExamNode(Node):
         )
         raise SystemExit(0 if fail == 0 else 1)
 
+    def _maybe_shuffle(self, cases: list) -> list:
+        out = list(cases)
+        if bool(self.get_parameter("shuffle").value):
+            random.shuffle(out)
+            print("  （已随机打乱顺序，模拟多把）")
+        return out
+
     def _run_feed(self) -> None:
-        cases = practice_cases()
+        cases = self._maybe_shuffle(practice_cases())
         print()
         print("========================================")
         print(f"  练习出题 feed：共 {len(cases)} 套自然语言题")
@@ -487,7 +608,7 @@ class PracticeExamNode(Node):
         raise SystemExit(0)
 
     def _run_robot(self) -> None:
-        cases = robot_cases()
+        cases = self._maybe_shuffle(robot_cases())
         print()
         print("========================================")
         print(f"  整机路径 robot：共 {len(cases)} 组 /task_command")
