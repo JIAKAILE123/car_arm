@@ -318,17 +318,36 @@ class VizBridge(Node):
             self._total = int(m.group(2))
             self._progress_text = f"正在处理第 {m.group(1)}/{m.group(2)} 件货物"
 
-        if any(k in text for k in ("DETACH_OK", "DONE", "QUEUE_DONE", "全部完成")):
+        # 注意：勿用裸 "DONE" 子串 — PLACE_VISION_DONE / PLACE_DOCK_OK 等会误停表
+        placed_one = (
+            "DETACH_OK" in text
+            or text.startswith("PLACED ")
+            or text.startswith("PLACED\t")
+        )
+        round_done = (
+            text == "DONE"
+            or text.startswith("DONE ")
+            or text == "QUEUE_DONE"
+            or text.startswith("QUEUE_DONE")
+            or "全部完成" in text
+        ) and "DRY" not in text and "VISION" not in text
+
+        if placed_one:
             self._phase = "done"
             self._bump_done()
             if self._total > 0 and self._done >= self._total:
                 self._work = "本轮任务全部完成"
                 self._stop_timer()
-            elif "DONE" in text and "DRY" not in text and self._total <= 0:
-                self._work = "本轮任务全部完成"
-                self._stop_timer()
             else:
                 self._work = "货物已放置，准备下一件"
+            self._publish_ints(pick=1, cur=0)
+        elif round_done:
+            # 整轮结束：只停表，不再 bump（件数已由 DETACH_OK/PLACED 计过）
+            self._phase = "done"
+            if self._total > 0:
+                self._done = self._total
+            self._work = "本轮任务全部完成"
+            self._stop_timer()
             self._publish_ints(pick=1, cur=0)
         elif any(k in text for k in ("DETACH", "PLACE", "LEAVE_ZONE", "PLACE_ARM")):
             self._phase = "place"

@@ -37,7 +37,15 @@ from yzbot_task.motion import (
     PRESET_REACH_R,
     PLACE_FRONT_M,
 )
-from yzbot_task.vision_align import annotate_bgr, detect_blob, is_visual_lock
+from yzbot_task.vision_align import (
+    annotate_bgr,
+    blob_area_frac,
+    blob_to_yaw_cmd,
+    detect_blob,
+    detect_green_pad,
+    green_pad_centered,
+    is_visual_lock,
+)
 from yzbot_task.vision_pose import (
     EstimateResult,
     estimate_cube_pose,
@@ -103,6 +111,10 @@ class TaskStateMachine(Node):
         # 沿长边(X≈1.0m)往区内收；短边(Y≈0.5m)只允许很小侧偏
         self.declare_parameter("place_inward_m", 0.18)
         self.declare_parameter("place_park_extra_m", 0.0)
+        # 投放末段：dock+转身后再用绿垫像素中心微调（最后1m，不在远处转弯时判）
+        self.declare_parameter("place_vision_enable", True)
+        self.declare_parameter("place_vision_timeout", 4.0)
+        self.declare_parameter("place_vision_target_cy", 0.58)
         # known_coords = 按官方序号固定坐标：导航到物块前方 → 预设臂 → 吸附
         self.declare_parameter("grasp_mode", "known_coords")
         self.declare_parameter("prefer_joint_pick", True)
@@ -2060,9 +2072,120 @@ class TaskStateMachine(Node):
                         push, vx=0.15, timeout=2.0
                     )
                     self.motion.stop_chassis()
+
+            # 4) 绿垫视觉微调：转身正对后再判像素中心（最后1m，马上放之前）
+            if bool(self.get_parameter("place_vision_enable").value):
+                self._place_vision_center_pad(
+                    zx, zy, arm_m=arm_m, from_west=from_west
+                )
         finally:
             self.motion.stop_chassis()
             self.motion.exit_local_mode()
+
+    def _place_vision_center_pad(
+        self,
+        zx: float,
+        zy: float,
+        *,
+        arm_m: float,
+        from_west: bool,
+    ) -> None:
+        """MODE_LOCAL：用前置相机绿垫质心把投放点收进垫心附近。
+
+        时机：Nav 到附近 + 粗转正对之后、松手之前（不在远处转弯时判，避免噪）。
+        TF 区内门禁仍作硬约束，视觉只做厘米级纠偏。
+        """
+        timeout = float(self.get_parameter("place_vision_timeout").value)
+        target_cy = float(self.get_parameter("place_vision_target_cy").value)
+        self._pub_status(
+            "PLACE_VISION 看绿垫像素中心 → 对区心（转身后再判，马上放之前）"
+        )
+        t0 = time.time()
+        saw = False
+        ok_streak = 0
+        while time.time() - t0 < timeout:
+            bgr = self.motion.grab_front_bgr()
+            if bgr is None:
+                time.sleep(0.06)
+                continue
+            pad = detect_green_pad(bgr)
+            c = self.motion.get_base_xy_yaw_map()
+            if c is None:
+                break
+            bx, by, yaw = float(c[0]), float(c[1]), float(c[2])
+            fx = bx + arm_m * math.cos(yaw)
+            fy = by + arm_m * math.sin(yaw)
+            in_pad = self._drop_inside_pad(
+                fx, fy, zx, zy, from_west=from_west
+            )
+
+            if pad is None:
+                # 看不见绿垫：若 TF 已在区内就停；否则沿长边微进
+                if in_pad and saw:
+                    break
+                if not in_pad:
+                    self.motion.publish_cmd_vel(0.10, 0.0)
+                else:
+                    self.motion.publish_cmd_vel(0.0, 0.0)
+                time.sleep(0.05)
+                continue
+
+            saw = True
+            frac = blob_area_frac(pad)
+            err_u = float(pad.err_u)
+            cy_frac = float(pad.cy) / float(max(pad.image_h, 1))
+            err_v = cy_frac - target_cy
+
+            if green_pad_centered(
+                pad,
+                max_err_u=0.12,
+                target_cy_frac=target_cy,
+                max_err_v=0.18,
+                min_area_frac=0.018,
+            ) and in_pad:
+                ok_streak += 1
+                if ok_streak >= 2:
+                    self._pub_status(
+                        f"PLACE_VISION_OK u={err_u:+.2f} cy={cy_frac:.2f} "
+                        f"frac={frac:.3f} in_pad=Y"
+                    )
+                    break
+            else:
+                ok_streak = 0
+
+            # 横向：绿心偏右 → 右转；纵向：垫心偏下=太近/太靠里 → 略退，偏上=前进
+            wz = blob_to_yaw_cmd(pad, gain=0.55, max_wz=0.14)
+            if err_v > 0.12:
+                vx = -0.04
+            elif err_v < -0.10 or frac < 0.03:
+                vx = 0.10
+            elif not in_pad:
+                vx = 0.12
+            else:
+                vx = 0.0
+            # 侧偏大时先拧正再前进，避免斜着蹭出短边
+            if abs(err_u) > 0.22:
+                vx = min(vx, 0.04)
+            self.motion.publish_cmd_vel(float(vx), float(wz))
+            time.sleep(0.05)
+
+        self.motion.stop_chassis()
+        c4 = self.motion.get_base_xy_yaw_map()
+        if c4 is not None:
+            yaw = float(c4[2])
+            fx = float(c4[0]) + arm_m * math.cos(yaw)
+            fy = float(c4[1]) + arm_m * math.sin(yaw)
+            ok = self._drop_inside_pad(fx, fy, zx, zy, from_west=from_west)
+            self._pub_status(
+                f"PLACE_VISION_DONE in_pad={'Y' if ok else 'N'} "
+                f"pred=({fx:.2f},{fy:.2f}) 区心=({zx:.2f},{zy:.2f})"
+            )
+            if not ok:
+                # 视觉纠偏后仍在短边外：沿长边再顶一小段
+                push = 0.14
+                self._pub_status(f"PLACE_VISION_PUSH +{push:.2f}m 保进区")
+                self.motion.drive_openloop_distance(push, vx=0.14, timeout=1.4)
+                self.motion.stop_chassis()
 
     def _leave_zone_after_place(self, zx: float, zy: float) -> None:
         """Straight reverse only — clear the pad so next approach won't crush cubes."""

@@ -493,3 +493,101 @@ def is_visual_lock(
     if abs(float(blob.err_u)) > max_err_u:
         return False
     return True
+
+
+def detect_green_pad(
+    bgr: np.ndarray,
+    max_width: int = 480,
+    *,
+    min_area_frac: float = 0.012,
+    max_area_frac: float = 0.55,
+) -> Optional[BlobResult]:
+    """Detect letter-zone green pad (large floor mat), not a cube.
+
+    Used at place time after Nav dock + face: centroid ≈ pad center in FOV.
+    """
+    h0, w0 = bgr.shape[:2]
+    scale = 1.0
+    work = bgr
+    if w0 > max_width:
+        scale = max_width / float(w0)
+        work = cv2.resize(
+            bgr,
+            (int(w0 * scale), int(h0 * scale)),
+            interpolation=cv2.INTER_AREA,
+        )
+    h, w = work.shape[:2]
+    hsv = cv2.cvtColor(work, cv2.COLOR_BGR2HSV)
+    # Gazebo / 赛场绿垫：偏亮青绿，放宽 H 以覆盖不同光照
+    mask = cv2.inRange(hsv, (35, 40, 40), (95, 255, 255))
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=2)
+    mask = cv2.medianBlur(mask, 5)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+
+    img_a = float(max(w * h, 1))
+    best: Optional[BlobResult] = None
+    best_score = -1e18
+    for cnt in contours:
+        area = float(cv2.contourArea(cnt))
+        frac = area / img_a
+        if frac < float(min_area_frac) or frac > float(max_area_frac):
+            continue
+        x, y, bw, bh = cv2.boundingRect(cnt)
+        # 垫子偏扁横条（长边对相机），拒细竖条/噪声
+        aspect = float(bw) / float(max(bh, 1))
+        if aspect < 0.6 or aspect > 6.0:
+            continue
+        m = cv2.moments(cnt)
+        if m["m00"] <= 1e-6:
+            continue
+        cx = float(m["m10"] / m["m00"])
+        cy = float(m["m01"] / m["m00"])
+        # 绿垫应在画面中下部（地面）；太靠上多半是墙绿/噪声
+        if cy < 0.22 * h:
+            continue
+        # 大面积 + 靠画面中心优先
+        dist = float(np.hypot(cx - 0.5 * w, cy - 0.55 * h)) / max(float(w), 1.0)
+        score = area / (1.0 + 6.0 * dist)
+        score *= 0.5 + 0.5 * (cy / max(float(h), 1.0))
+        if score > best_score:
+            best_score = score
+            best = BlobResult(
+                color="green",
+                cx=cx,
+                cy=cy,
+                area=area,
+                image_w=w,
+                image_h=h,
+                x0=float(x),
+                y0=float(y),
+                x1=float(x + bw),
+                y1=float(y + bh),
+            )
+    return best
+
+
+def green_pad_centered(
+    blob: Optional[BlobResult],
+    *,
+    max_err_u: float = 0.14,
+    target_cy_frac: float = 0.58,
+    max_err_v: float = 0.22,
+    min_area_frac: float = 0.02,
+) -> bool:
+    """True when green-pad centroid is near image aim (place sweet spot)."""
+    if blob is None or str(blob.color).lower() != "green":
+        return False
+    frac = blob_area_frac(blob)
+    if frac < float(min_area_frac):
+        return False
+    if abs(float(blob.err_u)) > float(max_err_u):
+        return False
+    cy_frac = float(blob.cy) / float(max(blob.image_h, 1))
+    if abs(cy_frac - float(target_cy_frac)) > float(max_err_v):
+        return False
+    return True
