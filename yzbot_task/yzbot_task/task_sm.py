@@ -644,7 +644,7 @@ class TaskStateMachine(Node):
                     )
                     return False
                 self._pub_status(
-                    f"NAV_PICK_SOFT dpark={dpark:.2f}m → 本地按坐标 creep 靠近"
+                    f"NAV_PICK_SOFT dpark={dpark:.2f}m → 交视觉搜索贴近"
                 )
                 self.motion.clear_costmaps(timeout=0.25)
             # Re-anchor at park facing cube — recovers if path brushed obstacles
@@ -685,19 +685,23 @@ class TaskStateMachine(Node):
                     )
                     return False
                 self._pub_status(
-                    f"NAV_PICK_SOFT dpark={dpark:.2f}m → 本地按坐标 creep 靠近"
+                    f"NAV_PICK_SOFT dpark={dpark:.2f}m → 交视觉搜索贴近"
                 )
                 self.motion.clear_costmaps(timeout=0.4)
         self.motion.stop_chassis()
-        # Distance check — must be within creep band (was 1.10m → 仍很远就进 OpenCV)
-        creep_r = float(self.get_parameter("grasp_creep_m").value)
+        # 导航只负责开到块附近；厘米级贴近交给后面 LOCAL_FLOW 视觉，不在这里 OpenCV
+        soft_r = max(
+            float(so) + 0.45,
+            float(self.get_parameter("grasp_creep_m").value) + 0.45,
+            1.05,
+        )
         if not self._ensure_near_cube(
-            color, cid, standoff_m=so, max_range_m=creep_r + 0.12
+            color, cid, standoff_m=so, max_range_m=soft_r
         ):
             self._pub_status(f"NAV_PICK_FAIL / TOO_FAR {color}_{cid}")
             return False
         self._pub_status(
-            f"NAV_PICK_OK → 本地: 转向识别+OpenCV贴框 "
+            f"NAV_PICK_OK → 交视觉抓取 "
             f"(park≈{float(self.get_parameter('grasp_standoff_m').value):.2f}m)"
         )
         return True
@@ -708,10 +712,10 @@ class TaskStateMachine(Node):
         cid: int,
         *,
         standoff_m: float,
-        max_range_m: float = 0.85,
-        retries: int = 2,
+        max_range_m: float = 1.05,
+        retries: int = 1,
     ) -> bool:
-        """If TF range to known cube is large, re-park — do not idle in OpenCV far away."""
+        """Nav 收尾软门限：够近就放行给视觉；过远只再停一次 PARK，不做 OpenCV。"""
         from yzbot_task.vision_pose import cube_bearing_in_base
 
         for attempt in range(max(1, int(retries) + 1)):
@@ -733,47 +737,45 @@ class TaskStateMachine(Node):
             )
             if rng <= float(max_range_m):
                 return True
-            # Prefer local creep toward known cube (Nav often cannot close last 0.5–0.8m)
-            settle = float(self.get_parameter("local_settle_sec").value)
-            creep_r = float(self.get_parameter("grasp_creep_m").value)
-            self._pub_status(
-                f"TOO_FAR r={rng:.2f}m → CREEP 按坐标开到 ≤{creep_r:.2f}m "
-                f"（try={attempt + 1}）"
-            )
-            self.motion.enter_local_mode(settle_sec=min(0.03, settle))
-            try:
-                if self.motion.creep_to_known_cube(
-                    color,
-                    cid,
-                    target_range=creep_r,
-                    max_vx=0.10,
-                    max_wz=0.16,
-                    timeout=8.0,
-                ):
-                    return True
-            finally:
-                self.motion.stop_chassis()
-                self.motion.exit_local_mode()
             ax, ay, ayaw = self._parking_xy(color, cid, standoff_m=standoff_m)
             self._pub_status(
-                f"TOO_FAR r={rng:.2f}m → 重停 PARK ({ax:.2f},{ay:.2f})"
+                f"TOO_FAR r={rng:.2f}m → 再停 PARK ({ax:.2f},{ay:.2f}) "
+                f"后交视觉（try={attempt + 1}）"
             )
             self.motion.exit_local_mode()
             xy_tol = float(self.get_parameter("pick_pose_gate_xy").value)
             yaw_tol = float(self.get_parameter("pose_gate_yaw_pick").value)
-            if not self.motion.navigate_and_verify(
+            soft_ok = self.motion.navigate_and_verify(
                 ax,
                 ay,
                 ayaw,
                 retries=1,
                 xy_tol=xy_tol,
                 yaw_tol=yaw_tol,
-            ):
-                continue
+            )
             self.motion.stop_chassis()
+            cur2 = self.motion.get_base_xy_yaw_map()
+            if cur2 is not None:
+                mx, my, _ = known_cube_xy(color, cid)
+                r2 = math.hypot(float(cur2[0]) - mx, float(cur2[1]) - my)
+                if r2 <= float(max_range_m) + 0.20:
+                    return True
+                if soft_ok and r2 <= float(max_range_m) + 0.35:
+                    # 软成功：仍交给 LOCAL_FLOW 视觉贴近
+                    self._pub_status(
+                        f"NEAR_CUBE_SOFT r={r2:.2f}m → 交视觉"
+                    )
+                    return True
         info2 = cube_bearing_in_base(self.motion.tf_buffer, color, cid)
-        if info2 is not None and float(info2[1]) <= float(max_range_m) + 0.15:
+        if info2 is not None and float(info2[1]) <= float(max_range_m) + 0.35:
             return True
+        cur3 = self.motion.get_base_xy_yaw_map()
+        if cur3 is not None:
+            mx, my, _ = known_cube_xy(color, cid)
+            if math.hypot(float(cur3[0]) - mx, float(cur3[1]) - my) <= (
+                float(max_range_m) + 0.35
+            ):
+                return True
         return False
 
     def _hold_pick_range(
@@ -1495,17 +1497,13 @@ class TaskStateMachine(Node):
                 reach_r = float(self.get_parameter("visual_target_r").value)
                 settle = float(self.get_parameter("local_settle_sec").value)
                 self._pub_status(
-                    f"LOCAL_FLOW → 导航到位后转向识别 "
+                    f"LOCAL_FLOW → 视觉识别抓取 "
                     f"{color}_{cid} map=({mx:.2f},{my:.2f})"
                 )
                 self.motion.enter_local_mode(settle_sec=min(0.03, settle))
                 aligned = False
                 try:
-                    # Restore original grasp vision: face → scan → OpenCV → soft nudge
-                    self._face_cube_yaw(
-                        color, cid, manage_mode=False, reanchor=False
-                    )
-
+                    # 导航已到位：先看相机；已看见则跳过按 map 拧头，直接 OpenCV
                     def _on_oc(
                         bgr,
                         blob,
@@ -1611,36 +1609,33 @@ class TaskStateMachine(Node):
                         self.motion.stop_chassis()
 
                     def _recover_see() -> bool:
-                        """FOV miss: if under→reverse; else creep to safe FOV band."""
+                        """FOV miss：倒退/正对 + 加强扫描（不做坐标慢行）。"""
                         _unbury_if_under()
-                        # Prefer FOV band ~0.55–0.65; never crawl onto the cube
-                        fov_r = 0.58 if (
-                            str(color).lower() == "blue" and int(cid) in (4, 5)
-                        ) else max(float(reach_r) + 0.12, 0.52)
                         self._pub_status(
-                            f"SEE_RECOVER {color}_{cid} → 保持r≈{fov_r:.2f}+正对+再扫"
+                            f"SEE_RECOVER {color}_{cid} → 正对+强扫描"
                         )
-                        self.motion.creep_to_known_cube(
-                            color,
-                            cid,
-                            target_range=float(fov_r),
-                            max_vx=0.10,
-                            max_wz=0.20,
-                            timeout=5.5,
-                        )
-                        _unbury_if_under()
                         self._face_cube_yaw(
                             color, cid, manage_mode=False, reanchor=False
                         )
                         if _see_now():
                             return True
-                        return _scan(9.0, 0.30, 14.0)
+                        return _scan(11.0, 0.34, 10.0)
 
                     _unbury_if_under()
                     seen0 = _see_now()
+                    if seen0:
+                        self._pub_status(
+                            f"SEE_OK {color}_{cid} → 跳过 map 拧头，直接视觉快贴"
+                        )
+                    else:
+                        # 未见才按 map 转向 + 扫描（避免发呆 TF 上拧歪）
+                        self._face_cube_yaw(
+                            color, cid, manage_mode=False, reanchor=False
+                        )
+                        seen0 = _see_now()
                     if not seen0:
-                        self._pub_status("SCAN_MAP 按坐标扫（未见色块）")
-                        seen0 = _scan(9.0, 0.26, 16.0)
+                        self._pub_status("SCAN_MAP 强视觉搜索（未见色块）")
+                        seen0 = _scan(11.0, 0.32, 10.0)
                     if not seen0:
                         seen0 = _recover_see()
                     if not seen0:
@@ -1660,8 +1655,11 @@ class TaskStateMachine(Node):
                             f"map=({mx:.2f},{my:.2f}) → OpenCV 最后试"
                         )
 
-                    oc_timeout = 7.5 if not seen0 else 5.5
-                    self._pub_status("OPENCV_ALIGN")
+                    oc_timeout = 6.5 if not seen0 else 4.5
+                    self._pub_status(
+                        "OPENCV_ALIGN"
+                        + ("（已看见→快贴）" if seen0 else "（搜索贴近）")
+                    )
                     aligned = self.motion.opencv_align_to_cube(
                         color,
                         cid,
@@ -1673,11 +1671,11 @@ class TaskStateMachine(Node):
                         ),
                         yaw_gain=float(self.get_parameter("align_yaw_gain").value),
                         max_wz=min(
-                            0.18, float(self.get_parameter("align_max_wz").value)
+                            0.22, float(self.get_parameter("align_max_wz").value)
                         ),
-                        max_vx=0.16,
+                        max_vx=0.22 if seen0 else 0.18,
                         timeout=oc_timeout,
-                        stable_hold_sec=0.14,
+                        stable_hold_sec=0.10,
                         lock_v_frac=float(self.get_parameter("lock_v_frac").value),
                         grasp_box_frac=float(
                             self.get_parameter("grasp_box_frac").value
@@ -1715,36 +1713,65 @@ class TaskStateMachine(Node):
                             max_travel_m=0.22,
                         )
                         if not aligned:
-                            # Last chance for any cube — do not pretend OK
                             if _recover_see():
-                                aligned = True
-                                self._pub_status("VIS_RECOVER_OK → 准备下探")
-                            else:
-                                self._pub_status(
-                                    f"VIS_FAIL {color}_{cid} → 仅按坐标贴近"
+                                aligned = self.motion.opencv_align_to_cube(
+                                    color,
+                                    cid,
+                                    target_r=reach_r,
+                                    r_tol=0.06,
+                                    err_ok=0.16,
+                                    yaw_gain=0.90,
+                                    max_wz=0.22,
+                                    max_vx=0.20,
+                                    timeout=6.0,
+                                    stable_hold_sec=0.10,
+                                    min_area=10.0,
+                                    lock_v_frac=float(
+                                        self.get_parameter("lock_v_frac").value
+                                    ),
+                                    grasp_box_frac=float(
+                                        self.get_parameter("grasp_box_frac").value
+                                    ),
+                                    on_frame=_on_oc,
                                 )
+                                self._pub_status(
+                                    "VIS_RECOVER_OK → 准备下探"
+                                    if aligned
+                                    else f"VIS_FAIL {color}_{cid}"
+                                )
+                            else:
+                                self._pub_status(f"VIS_FAIL {color}_{cid}")
 
-                    # ALL cubes: never arm-down while base is still far
-                    # 「看见」≠够近：远处色块也能进 FOV，必须 r 到位才夹
+                    # 「看见」≠够近：再用视觉贴合，不用坐标 creep
                     pick_r = float(reach_r)
                     if str(color).lower() == "blue" and int(cid) in (4, 5):
                         pick_r = max(pick_r, 0.46)
-                    # 硬门限：超过此距离禁止下探（短于旧 +0.28，不靠「看见」放行）
-                    max_pick_r = pick_r + 0.10
+                    max_pick_r = pick_r + 0.12
                     info_r = _cube_r()
                     if info_r is not None and info_r > pick_r + 0.06:
                         self._pub_status(
-                            f"PRE_PICK_CREEP {color}_{cid} "
-                            f"r={info_r:.2f}m → ≤{pick_r:.2f}m（快贴）"
+                            f"PRE_PICK_VIS {color}_{cid} "
+                            f"r={info_r:.2f}m → ≤{pick_r:.2f}m（视觉快贴）"
                         )
-                        # 短快一次，不拖长时间
-                        self.motion.creep_to_known_cube(
+                        self.motion.opencv_align_to_cube(
                             color,
                             cid,
-                            target_range=pick_r,
-                            max_vx=0.20,
-                            max_wz=0.20,
-                            timeout=3.2,
+                            target_r=pick_r,
+                            r_tol=0.05,
+                            err_ok=0.14,
+                            yaw_gain=0.90,
+                            max_wz=0.22,
+                            max_vx=0.24,
+                            timeout=5.0,
+                            stable_hold_sec=0.08,
+                            min_area=10.0,
+                            lock_v_frac=float(
+                                self.get_parameter("lock_v_frac").value
+                            ),
+                            grasp_box_frac=float(
+                                self.get_parameter("grasp_box_frac").value
+                            ),
+                            on_frame=_on_oc,
                         )
                         _unbury_if_under()
                         info_r = _cube_r()
@@ -1779,22 +1806,8 @@ class TaskStateMachine(Node):
                     )
                     pick_ok = False
                 else:
-                    # Quick pin — short settle only
-                    so = float(self.get_parameter("grasp_standoff_m").value)
-                    ax, ay, ayaw = self._parking_xy(color, cid, standoff_m=so)
-                    cur = self.motion.get_base_xy_yaw_map()
-                    if cur is not None:
-                        pin_x, pin_y, pin_yaw = (
-                            float(cur[0]),
-                            float(cur[1]),
-                            float(cur[2]),
-                        )
-                        self.motion.reanchor_amcl(
-                            pin_x, pin_y, pin_yaw, settle_sec=0.03
-                        )
-                    else:
-                        self.motion.reanchor_amcl(ax, ay, ayaw, settle_sec=0.03)
-
+                    # 不用 live TF reanchor：视觉段 map 可能发呆，钉当前位会把误差锁死
+                    # AMCL 靠 LOCAL nomotion 心跳保扫点；下探后交回 Nav 再定位
                     self.motion.stop_chassis()
                     self._pub_status("PICK: 预设下探 → 吸附")
                     pick_ok = self._pick_known_coords(color, cid)
@@ -1877,6 +1890,7 @@ class TaskStateMachine(Node):
             # Keep costmap marks of the placed cube; do not clear
             self.motion.prepare_next_nav(lx, ly, pyaw, clear_maps=False)
 
+        # 队列跑完≠件件成功；面板只认 PLACED，勿暗示全部完成
         self._pub_status("DONE")
 
     def _drop_inside_pad(

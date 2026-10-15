@@ -100,6 +100,10 @@ class MotionHelpers:
         self._clear_global_cli = node.create_client(
             Empty, "/global_costmap/clear_entirely_global_costmap"
         )
+        # Vision LOCAL: force AMCL laser updates while nearly stationary
+        # (update_min_d/a otherwise freeze the filter → map pose looks "飘").
+        self._nomotion_cli = node.create_client(Empty, "/request_nomotion_update")
+        self._nomotion_timer = None
         # Virtual keepout over place pads so Nav2 routes around (avoid fly/crush)
         self._zone_keepout: dict = {}
         self._placed_keepout: list = []  # always-on marks for dropped cubes
@@ -903,6 +907,35 @@ class MotionHelpers:
         except Exception as exc:  # noqa: BLE001
             self.node.get_logger().warn(f"cancel_nav: {exc}")
 
+    def _request_nomotion_update(self) -> None:
+        """Ask AMCL to integrate one laser scan without requiring motion."""
+        if not self._nomotion_cli.service_is_ready():
+            return
+        try:
+            # Fire-and-forget (timer must not block / nest spin)
+            self._nomotion_cli.call_async(Empty.Request())
+        except Exception as exc:  # noqa: BLE001
+            self.node.get_logger().warn(f"nomotion_update: {exc}")
+
+    def _start_nomotion_heartbeat(self, period_sec: float = 1.0) -> None:
+        self._stop_nomotion_heartbeat()
+        if not self._nomotion_cli.service_is_ready():
+            self._nomotion_cli.wait_for_service(timeout_sec=0.4)
+        self._request_nomotion_update()
+        self._nomotion_timer = self.node.create_timer(
+            float(period_sec), self._request_nomotion_update
+        )
+
+    def _stop_nomotion_heartbeat(self) -> None:
+        t = self._nomotion_timer
+        self._nomotion_timer = None
+        if t is not None:
+            try:
+                t.cancel()
+                self.node.destroy_timer(t)
+            except Exception:  # noqa: BLE001
+                pass
+
     def enter_local_mode(self, settle_sec: float = 1.5) -> None:
         """Cancel Nav ownership of wheels; task_sm may publish cmd_vel."""
         self.cancel_nav()
@@ -911,10 +944,14 @@ class MotionHelpers:
         time.sleep(min(0.06, max(float(settle_sec), 0.0)))
         self.drive_owner = "local"
         self.stop_chassis(n=1)
-        self.node.get_logger().info("MODE_LOCAL (task owns cmd_vel)")
+        self._start_nomotion_heartbeat(1.0)
+        self.node.get_logger().info(
+            "MODE_LOCAL (task owns cmd_vel; AMCL nomotion heartbeat on)"
+        )
 
     def exit_local_mode(self) -> None:
         """Hand wheels back to Nav2 for NavigateToPose."""
+        self._stop_nomotion_heartbeat()
         self.stop_chassis(n=1)
         self.drive_owner = "nav"
         self.node.get_logger().info("MODE_NAV (Nav2 owns cmd_vel)")

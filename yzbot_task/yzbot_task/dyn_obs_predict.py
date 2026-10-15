@@ -20,19 +20,20 @@ from std_msgs.msg import Header
 # Must match yzbot_gazebo_plugins/src/dyn_obs_mover.cpp
 _PERIOD = 35.0
 _OBS = (
-    # (x0, amp, phase, y, half_x, half_y)  box 0.55×0.28 + pad
-    (0.20, 0.50, 0.0, -1.35, 0.32, 0.22),
-    (0.00, 0.45, 1.2, -6.15, 0.32, 0.22),
+    # (x0, amp, phase, y, half_x, half_y) — 必须与 dyn_obs_mover.cpp 一致
+    (0.20, 0.72, 0.0, -1.35, 0.36, 0.26),
+    (-0.15, 0.75, 1.2, -6.15, 0.36, 0.26),
 )
 
 
 class DynObsPredict(Node):
     def __init__(self) -> None:
         super().__init__("dyn_obs_predict")
-        self.declare_parameter("horizon_sec", 2.5)
-        self.declare_parameter("dt_sec", 0.25)
-        self.declare_parameter("rate_hz", 8.0)
-        self.declare_parameter("step_m", 0.08)
+        # 仅加强杆预测；不改 DWB/膨胀（避免物块旁空转）
+        self.declare_parameter("horizon_sec", 2.6)
+        self.declare_parameter("dt_sec", 0.20)
+        self.declare_parameter("rate_hz", 10.0)
+        self.declare_parameter("step_m", 0.07)
         self._pub = self.create_publisher(PointCloud2, "/yzbot/dyn_obs_predict", 1)
         hz = max(2.0, float(self.get_parameter("rate_hz").value))
         self.create_timer(1.0 / hz, self._tick)

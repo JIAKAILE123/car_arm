@@ -199,7 +199,10 @@ class VizBridge(Node):
     def _progress_line(self) -> str:
         if self._total <= 0:
             return self._progress_text
-        return f"已完成 {self._done}/{self._total} 件货物"
+        if self._done >= self._total:
+            return f"已完成 {self._done}/{self._total} 件货物"
+        # 进行中不要写「已完成」，否则底部像提前结束
+        return f"进度 {self._done}/{self._total} 件（进行中）"
 
     def _target_line(self) -> str:
         if not self._cur_color:
@@ -304,7 +307,12 @@ class VizBridge(Node):
     def _bump_done(self):
         if self._total > 0:
             self._done = min(self._total, self._done + 1)
-            self._progress_text = f"已完成 {self._done}/{self._total} 件货物"
+            if self._done >= self._total:
+                self._progress_text = f"已完成 {self._done}/{self._total} 件货物"
+            else:
+                self._progress_text = (
+                    f"进度 {self._done}/{self._total} 件（进行中）"
+                )
 
     def _on_status(self, msg: String):
         text = (msg.data or "").strip()
@@ -312,44 +320,81 @@ class VizBridge(Node):
             return
         self._set_color_from_text(text)
 
-        m = re.search(r"(?:pick|块|第)\s*(\d+)\s*/\s*(\d+)", text, re.I)
+        # STEP 1/5 — 只同步总数与当前序号；_done 只靠 PLACED 累加
+        # （跳过的块不能按「第 i 步→已完成 i-1」估算，否则会虚高）
+        m = re.search(r"(?:STEP|pick|块|第)\s*(\d+)\s*/\s*(\d+)", text, re.I)
         if m:
-            self._done = max(0, int(m.group(1)) - 1)
-            self._total = int(m.group(2))
-            self._progress_text = f"正在处理第 {m.group(1)}/{m.group(2)} 件货物"
+            cur_i = int(m.group(1))
+            tot = int(m.group(2))
+            self._total = tot
+            self._progress_text = (
+                f"正在处理第 {cur_i}/{tot} 件"
+                f"（已放置 {self._done}/{tot}）"
+            )
 
-        # 注意：勿用裸 "DONE" 子串 — PLACE_VISION_DONE / PLACE_DOCK_OK 等会误停表
-        placed_one = (
-            "DETACH_OK" in text
-            or text.startswith("PLACED ")
-            or text.startswith("PLACED\t")
-        )
+        # 1) 勿用裸 DONE — PLACE_VISION_DONE 等会误停表
+        # 2) 每块先 DETACH_OK 再 PLACED —— 只计 PLACED 一次，否则翻倍提前「完成」
+        # 3) 队列 DONE ≠ 全部放成功：跳过最后一块时也会发 DONE，禁止把进度拉满
+        placed_one = text.startswith("PLACED ") or text.startswith("PLACED\t")
         round_done = (
             text == "DONE"
             or text.startswith("DONE ")
             or text == "QUEUE_DONE"
             or text.startswith("QUEUE_DONE")
             or "全部完成" in text
-        ) and "DRY" not in text and "VISION" not in text
+        ) and ("DRY" not in text) and ("VISION" not in text)
 
         if placed_one:
-            self._phase = "done"
             self._bump_done()
             if self._total > 0 and self._done >= self._total:
+                self._phase = "done"
                 self._work = "本轮任务全部完成"
                 self._stop_timer()
+                self._publish_ints(pick=1, cur=0)
             else:
-                self._work = "货物已放置，准备下一件"
-            self._publish_ints(pick=1, cur=0)
+                self._phase = "nav"
+                self._work = (
+                    f"已放置 {self._done}/{self._total}，前往下一件"
+                    if self._total > 0
+                    else "货物已放置，准备下一件"
+                )
+                # 中途保持「前往取货」，勿 cur=0 待机（否则像结束了）
+                self._publish_ints(pick=1, cur=1)
         elif round_done:
-            # 整轮结束：只停表，不再 bump（件数已由 DETACH_OK/PLACED 计过）
             self._phase = "done"
-            if self._total > 0:
-                self._done = self._total
-            self._work = "本轮任务全部完成"
             self._stop_timer()
+            if self._total > 0 and self._done >= self._total:
+                self._progress_text = f"已完成 {self._done}/{self._total} 件货物"
+                self._work = "本轮任务全部完成"
+            elif self._total > 0:
+                skipped = max(0, self._total - self._done)
+                self._progress_text = (
+                    f"流程结束：成功 {self._done}/{self._total}"
+                    f"（跳过 {skipped}）"
+                )
+                self._work = (
+                    f"队列结束，仅完成 {self._done}/{self._total} 件"
+                )
+            else:
+                self._progress_text = f"流程结束（已放置 {self._done}）"
+                self._work = "本轮流程结束"
             self._publish_ints(pick=1, cur=0)
-        elif any(k in text for k in ("DETACH", "PLACE", "LEAVE_ZONE", "PLACE_ARM")):
+        elif any(
+            k in text
+            for k in (
+                # 勿用裸 "PLACE"/"DETACH"：DETACH_CLEAR、PLACE 字样会在抓取段误报「运往放置」
+                "NAV_PLACE",
+                "PLACE_TARGET",
+                "PLACE_DOCK",
+                "PLACE_ARM",
+                "PLACE_VISION",
+                "PLACE_LIFT",
+                "LEAVE_ZONE",
+                "DETACH →",
+                "DETACH_OK",
+                "DETACH_SOFT",
+            )
+        ):
             self._phase = "place"
             self._work = "运往放置区并完成放置"
             self._publish_ints(cur=3, pick=0)
@@ -359,14 +404,26 @@ class VizBridge(Node):
                 "ATTACH",
                 "JOINT_GRASP",
                 "PRESET_ARM",
+                "DETACH_CLEAR",
                 "OPENCV",
                 "FACE_CUBE",
                 "MTC_",
                 "GRIPPER",
                 "EE_TO_CUBE",
                 "LOOK:",
+                "LOCAL_FLOW",
+                "SCAN",
+                "SEE_",
+                "PRE_PICK",
+                "NEAR_CUBE",
+                "VIS_",
+                "PICK:",
+                "AIM_MAP",
+                "CUBE_UNDER",
+                "NAV_PICK_OK",
             )
         ):
+            # 导航到位后的视觉贴近/抓取 —— 勿再显示「前往取货」
             self._phase = "grasp"
             self._work = "识别目标并执行抓取"
             self._publish_ints(cur=2, pick=0)
@@ -375,13 +432,8 @@ class VizBridge(Node):
             for k in (
                 "NAV",
                 "VIA",
-                "CREEP",
-                "AIM",
-                "SCAN",
-                "DRIVE",
-                "VIS_NEAR",
-                "LOCAL_FLOW",
                 "PARK",
+                "SAFE_PICK",
             )
         ):
             self._phase = "nav"

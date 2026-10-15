@@ -75,7 +75,12 @@ def generate_launch_description():
             executable='dyn_obs_predict',
             name='dyn_obs_predict',
             output='screen',
-            parameters=[{'use_sim_time': use_sim_time}],
+            parameters=[{
+                'use_sim_time': use_sim_time,
+                'horizon_sec': 2.6,
+                'dt_sec': 0.20,
+                'rate_hz': 10.0,
+            }],
         ),
         Node(
             package='rviz2',
