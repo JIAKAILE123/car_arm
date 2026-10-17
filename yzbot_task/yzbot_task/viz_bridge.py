@@ -331,6 +331,10 @@ class VizBridge(Node):
                 f"正在处理第 {cur_i}/{tot} 件"
                 f"（已放置 {self._done}/{tot}）"
             )
+            # 清掉上一次 FAIL 残留的「作业受阻」文案
+            self._phase = "nav"
+            self._work = f"开始第 {cur_i}/{tot} 件任务"
+            self._publish_ints(cur=1)
 
         # 1) 勿用裸 DONE — PLACE_VISION_DONE 等会误停表
         # 2) 每块先 DETACH_OK 再 PLACED —— 只计 PLACED 一次，否则翻倍提前「完成」
@@ -443,11 +447,39 @@ class VizBridge(Node):
             self._phase = "ready"
             self._work = "任务指令已解析"
             self._publish_ints(cur=0)
-        elif any(k in text for k in ("WAITING_SERVERS", "SERVERS")):
+        elif "WAITING_SERVERS" in text:
             self._work = "系统初始化中"
             self._publish_ints(cur=0)
-        elif any(k in text for k in ("ERROR", "FAIL", "ABORT")):
-            self._work = "作业受阻，正在恢复"
+        elif text.startswith("SERVERS_OK") or text.startswith("SERVERS_OK "):
+            self._phase = "nav"
+            self._work = "定位就绪，开始作业"
+            self._publish_ints(cur=1)
+        elif "LOC_WAIT" in text:
+            self._phase = "ready"
+            self._work = "等待仿真定位就绪"
+            self._publish_ints(cur=0)
+        elif any(
+            k in text
+            for k in (
+                # 勿用裸 FAIL/ABORT；定位等待不算「作业受阻」
+                "LOC_FAIL",
+                "PARSE_FAIL",
+                "PICK_ABORT",
+                "NAV_FAIL",
+                "NAV_PICK_FAIL",
+                "ATTACH_FAIL",
+                "SERVERS_UNAVAILABLE",
+                "ERROR:",
+            )
+        ):
+            if "LOC_" in text:
+                self._work = "定位未就绪，请检查 Gazebo / Nav2"
+            else:
+                self._work = "作业受阻，正在恢复"
+        elif "SKIP_CUBE" in text:
+            self._phase = "nav"
+            self._work = "本块跳过，前往下一件"
+            self._publish_ints(cur=1)
 
         self._flush()
 

@@ -288,9 +288,9 @@ class ExportCubePoses(Node):
                 self.get_logger().warn(f"old zones skip: {exc}")
         # also common world tokens
         for name, (ox, oy, oz) in {
-            "zone_a": (-1.00, -8.10, 0.01),
-            "zone_b": (1.50, -4.00, 0.01),
-            "zone_c": (-0.80, 0.20, 0.01),
+            "zone_a": (4.20, -1.80, 0.01),
+            "zone_b": (0.60, -3.40, 0.01),
+            "zone_c": (-6.00, -2.90, 0.01),
         }.items():
             old_by_name.setdefault(name, (ox, oy, oz))
 

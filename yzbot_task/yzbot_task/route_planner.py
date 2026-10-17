@@ -63,7 +63,7 @@ def _dist(a: Point, b: Point) -> float:
 
 
 def _load_zones(poses_yaml: Optional[Path] = None) -> Dict[str, Point]:
-    zones = {"A": (-1.00, -8.10), "B": (1.50, -4.00), "C": (-0.80, 0.20)}
+    zones = {"A": (4.20, -1.80), "B": (0.60, -3.40), "C": (-6.00, -2.90)}
     path = poses_yaml or (
         Path(__file__).resolve().parents[1] / "config" / "poses.yaml"
     )

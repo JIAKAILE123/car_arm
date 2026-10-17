@@ -54,13 +54,13 @@ private:
       return;
     }
 
-    // Both horizontal bars slide on X. Period ~35s.
-    // obs1（上面）：再加长 → x ∈ [-0.52, 0.92]
-    const double x1 = 0.20 + 0.72 * std::sin(2.0 * M_PI * t / 35.0);
+    // Both horizontal bars slide on X. Period 10.67s (1.5x of 16s).
+    // obs1（上面）：x ∈ [-0.75, 1.15]
+    const double x1 = 0.20 + 0.95 * std::sin(2.0 * M_PI * t / 10.67);
     SetPose(this->obs1_, x1, -1.35, 0.20);
 
-    // obs2（下面）：再加长 → x ∈ [-0.90, 0.60]
-    const double x2 = -0.15 + 0.75 * std::sin(2.0 * M_PI * t / 35.0 + 1.2);
+    // obs2（下面）：x ∈ [-1.30, 1.00]
+    const double x2 = -0.15 + 1.15 * std::sin(2.0 * M_PI * t / 10.67 + 1.2);
     SetPose(this->obs2_, x2, -6.15, 0.20);
   }
 

@@ -98,7 +98,7 @@
           "visible": false
         },
         "/scan": {
-          "visible": true,
+          "visible": false,
           "colorField": "range",
           "colorMode": "gradient",
           "colorMap": "turbo",
@@ -190,7 +190,7 @@
           "visible": false
         },
         "/local_costmap/clearing_endpoints": {
-          "visible": true,
+          "visible": false,
           "colorField": "z",
           "colorMode": "colormap",
           "colorMap": "turbo"
@@ -211,7 +211,7 @@
           "visible": true
         },
         "/downsampled_costmap": {
-          "visible": true
+          "visible": false
         },
         "/transformed_global_plan": {
           "visible": true

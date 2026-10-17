@@ -15,9 +15,9 @@ cd ~/dev_ws/yzbot
 `run.sh` 会自动避开 conda，改用系统 `/usr/bin/python3`（否则常见 `No module named 'numpy'`，小车也 spawn 不出来）。
 
 启动后：
-1. Nav2 的 RViz 里点一次 **2D Pose Estimate**
+1. 定位已用 Gazebo 真值（`gt_localization`），**不用**再点 2D Pose Estimate
 2. coStudio → 打开连接 → `ws://127.0.0.1:21274`
-3. 导入布局：`~/dev_ws/yzbot/src/costudio_yzbot.json`（桌面也有一份）
+3. 重新导入布局：`~/dev_ws/yzbot/src/costudio_yzbot.json`（已默认关掉 `/scan` 激光点）
 4. 切到 **6-Exam** 终端，按 **空格** 出题（可多次）
 
 正式比赛隐藏总用时：`SHOW_ELAPSED=false ./run.sh`  
@@ -72,3 +72,5 @@ pkill -9 -f 'ros2 launch|task_sm|llm_solver|viz_bridge|rosbridge|nav2|amcl' 2>/d
 | `/viz/*` `/chat` | coStudio 面板 |
 
 默认映射：`x→红`，`y→蓝`；数量 ≥3 → A，否则 → C。
+
+

@@ -68,9 +68,9 @@ echo "当前 python3: $(/usr/bin/which python3)  ($(/usr/bin/python3 -V 2>&1))"
 open_tab "1-Gazebo" "ros2 launch mybot gazebo_world2.launch.py"
 echo "等待 Gazebo 加载世界并生成小车 …"; sleep 25
 
-# ② Nav2（起来后请在 RViz 点一次 2D Pose Estimate）
+# ② Nav2（GT 定位自动对齐，无需 2D Pose Estimate）
 open_tab "2-Nav2" "ros2 launch bot_navigation nav_bringup_gazebo2.launch.py"
-echo "等待 Nav2 …"; sleep 12
+echo "等待 Nav2 + GT 定位 …"; sleep 12
 
 # ③ coStudio 转发 + viz
 open_tab "3-Viz" "ros2 launch yzbot_task rosbridge_viz.launch.py show_elapsed:=${SHOW_ELAPSED}"
@@ -109,7 +109,7 @@ fi
 
 echo
 echo "已启动各终端。接下来："
-echo "  1) Nav2 的 RViz 里点一次「2D Pose Estimate」对准车位"
+echo "  1) 定位已用 Gazebo 真值（gt_localization），一般不用再点 2D Pose Estimate"
 echo "  2) coStudio → 打开连接 → ws://127.0.0.1:21274"
 echo "  3) 导入布局：${COSTUDIO_LAYOUT}"
 echo "  4) 切到「6-Exam」终端，按【空格】出题"

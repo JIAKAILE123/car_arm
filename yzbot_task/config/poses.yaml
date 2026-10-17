@@ -12,20 +12,21 @@ blue_approach:
   y: -2.80
   yaw: 3.1416
 
-# Place zones: A south (raised off wall) | B mid-east | C north
+# Place zones on the west side, split by existing walls (y≈-8.2 and y≈-4.4)
+# A is east of the wall tip and further south, clear of the dead corner.
 zone_a:
-  x: -1.00
-  y: -8.10
+  x: 4.20
+  y: -1.80
   yaw: 0.0
 
 zone_b:
-  x: 1.50
-  y: -4.00
+  x: 0.60
+  y: -3.40
   yaw: 0.0
 
 zone_c:
-  x: -0.80
-  y: 0.20
+  x: -6.00
+  y: -2.90
   yaw: 0.0
 
 # Pre-match mapping (example from rules PDF):

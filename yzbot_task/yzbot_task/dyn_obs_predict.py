@@ -18,11 +18,11 @@ from std_msgs.msg import Header
 
 
 # Must match yzbot_gazebo_plugins/src/dyn_obs_mover.cpp
-_PERIOD = 35.0
+_PERIOD = 10.67
 _OBS = (
     # (x0, amp, phase, y, half_x, half_y) — 必须与 dyn_obs_mover.cpp 一致
-    (0.20, 0.72, 0.0, -1.35, 0.36, 0.26),
-    (-0.15, 0.75, 1.2, -6.15, 0.36, 0.26),
+    (0.20, 0.95, 0.0, -1.35, 0.36, 0.26),
+    (-0.15, 1.15, 1.2, -6.15, 0.36, 0.26),
 )
 
 

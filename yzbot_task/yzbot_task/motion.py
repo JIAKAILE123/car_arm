@@ -14,6 +14,7 @@ from rclpy.duration import Duration
 from tf2_ros import Buffer, TransformListener
 
 from nav2_msgs.action import NavigateToPose, NavigateThroughPoses
+from nav_msgs.msg import Path
 from control_msgs.action import FollowJointTrajectory
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from builtin_interfaces.msg import Duration as MsgDuration
@@ -57,7 +58,9 @@ PREGRASP = survey_joints(0.0)
 # Stuck-below was traj time int(0.7)=0, not tip height.
 PICK = [0.0, 1.2, 1.1, 0.0, -0.3, 0.0]
 PRESET_REACH_R = 0.40
-CARRY = [0.0, 0.25, 0.7, 0.0, -0.6, 0.0]
+# Boot / stow pose — same joints after pick-lift and after place-lift.
+HOME = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+CARRY = list(HOME)
 PLACE = [0.0, 0.7, 1.0, 0.0, -0.4, 0.0]
 # arm_place_pose: physical EE was past pad center when parked at 0.38 —
 # use 0.45 so base sits further back and drop lands nearer zone center.
@@ -90,7 +93,15 @@ class MotionHelpers:
         # drive_owner: "nav" = only NavigateToPose; "local" = task cmd_vel (yaw only)
         self.drive_owner = "nav"
         self._nav_goal_handle = None
+        # Gazebo GT owns map→odom; skip AMCL reanchor / nomotion when true
+        if not node.has_parameter("use_gt_localization"):
+            node.declare_parameter("use_gt_localization", True)
+        self.use_gt_localization = bool(
+            node.get_parameter("use_gt_localization").value
+        )
         self.cmd_vel_pub = node.create_publisher(Twist, "cmd_vel", 10)
+        self._plan_pub = node.create_publisher(Path, "/plan", 10)
+        self._local_plan_pub = node.create_publisher(Path, "/local_plan", 10)
         self.initialpose_pub = node.create_publisher(
             PoseWithCovarianceStamped, "/initialpose", 10
         )
@@ -230,43 +241,41 @@ class MotionHelpers:
         need_arm: bool = True,
         need_attach: bool = True,
     ) -> bool:
-        """Wait for Nav / arm / attach. Keep short — long waits look like 'received but no plan'."""
+        """Wait for Nav / arm / attach. Short timeouts — stack should already be up."""
         ok = True
-        t_nav = min(float(timeout), 8.0)
-        t_arm = min(float(timeout), 8.0)
-        t_att = min(float(timeout), 5.0)
+        # Controllers are normally already up when a task arrives; do not burn
+        # 20–30s here or the UI sits on「前往取货」with the car frozen.
+        t_nav = min(float(timeout), 2.0)
+        t_arm = min(float(timeout), 2.0)
+        t_att = min(float(timeout), 1.5)
 
-        self.node.get_logger().info("WAITING_SERVERS: navigate_to_pose …")
-        if not self.nav.wait_for_server(timeout_sec=t_nav):
-            self.node.get_logger().error("navigate_to_pose action unavailable — 先开 Nav2")
+        def _wait_action(client, name: str, t: float) -> bool:
+            if client.server_is_ready():
+                return True
+            self.node.get_logger().info(f"WAITING_SERVERS: {name} …")
+            if client.wait_for_server(timeout_sec=t):
+                return True
+            self.node.get_logger().error(f"{name} unavailable")
+            return False
+
+        if not _wait_action(self.nav, "navigate_to_pose", t_nav):
             ok = False
-        else:
-            self.node.get_logger().info("WAITING_SERVERS: navigate_to_pose OK")
-
-        # Optional: continuous multi-pose nav (door via). Soft-fail if absent.
-        if not self.nav_through.wait_for_server(timeout_sec=min(3.0, t_nav)):
-            self.node.get_logger().warn(
-                "navigate_through_poses unavailable — door via will fall back"
-            )
+        # navigate_through_poses unused for pick — do not block on it
         if need_arm:
-            self.node.get_logger().info("WAITING_SERVERS: arm_controller …")
-            if not self.arm.wait_for_server(timeout_sec=t_arm):
-                self.node.get_logger().error("arm_controller action unavailable")
+            if not _wait_action(self.arm, "arm_controller", t_arm):
                 ok = False
-            else:
-                self.node.get_logger().info("WAITING_SERVERS: arm_controller OK")
-            if not self.grip.wait_for_server(timeout_sec=3.0):
-                self.node.get_logger().warn("gripper action unavailable (optional)")
+            if not self.grip.server_is_ready():
+                self.grip.wait_for_server(timeout_sec=0.4)
         if need_attach:
-            self.node.get_logger().info("WAITING_SERVERS: ATTACH/DETACH …")
-            if not self.attach_cli.wait_for_service(timeout_sec=t_att):
-                self.node.get_logger().error("/ATTACHLINK unavailable")
-                ok = False
-            if not self.detach_cli.wait_for_service(timeout_sec=t_att):
-                self.node.get_logger().error("/DETACHLINK unavailable")
-                ok = False
-            if ok:
-                self.node.get_logger().info("WAITING_SERVERS: attach OK")
+            if not self.attach_cli.service_is_ready():
+                self.node.get_logger().info("WAITING_SERVERS: ATTACH …")
+                if not self.attach_cli.wait_for_service(timeout_sec=t_att):
+                    self.node.get_logger().error("/ATTACHLINK unavailable")
+                    ok = False
+            if not self.detach_cli.service_is_ready():
+                if not self.detach_cli.wait_for_service(timeout_sec=t_att):
+                    self.node.get_logger().error("/DETACHLINK unavailable")
+                    ok = False
         return ok
 
     def _spin_until(self, future, timeout_sec: float) -> bool:
@@ -326,12 +335,15 @@ class MotionHelpers:
         )
         # If localization is dead, Nav2 accepts nothing useful / no path in RViz
         if self.get_base_xy_yaw_map() is None:
-            self.node.get_logger().error(
-                "NAV abort: no map→base TF (先 2D Pose Estimate)"
+            tip = (
+                "等 gt_localization / Gazebo spawn"
+                if self.use_gt_localization
+                else "先 2D Pose Estimate"
             )
+            self.node.get_logger().error(f"NAV abort: no map→base TF ({tip})")
             return False
         send = self.nav.send_goal_async(goal)
-        if not self._spin_until(send, 30.0):
+        if not self._spin_until(send, 5.0):
             self.node.get_logger().error("nav send_goal timeout")
             return False
         goal_handle = send.result()
@@ -339,6 +351,9 @@ class MotionHelpers:
             self.node.get_logger().error("nav goal rejected")
             return False
         self._nav_goal_handle = goal_handle
+        self.node.get_logger().info(
+            f"NAV_ACCEPTED → ({x:.2f},{y:.2f}) 等待路径/起步"
+        )
         result_fut = goal_handle.get_result_async()
         t0 = time.time()
         while not result_fut.done():
@@ -676,11 +691,22 @@ class MotionHelpers:
         timeout: float = 180.0,
         settle_sec: float = 1.5,
         reanchor: bool = True,
+        stay_if_xy: Optional[float] = None,
     ) -> bool:
         """Nav2 approach + TF pose gate (standard mobile-manipulator pattern)."""
         attempts = max(int(retries), 0) + 1
         for i in range(attempts):
             if i > 0:
+                cur_hold = self.get_base_xy_yaw_map()
+                if cur_hold is not None and stay_if_xy is not None:
+                    d_hold = math.hypot(cur_hold[0] - float(x), cur_hold[1] - float(y))
+                    if d_hold <= float(stay_if_xy):
+                        self.node.get_logger().info(
+                            f"NAV stay dxy={d_hold:.3f}≤{float(stay_if_xy):.2f} "
+                            "→ 不再重发路径，交给夹取"
+                        )
+                        self.stop_chassis()
+                        return True
                 # Near dyn_obs: stop, clear, then replan (don't shove through)
                 self.stop_chassis(n=6)
                 time.sleep(0.15)
@@ -690,13 +716,40 @@ class MotionHelpers:
                     f"NAV retry {i + 1}/{attempts}: 停车清图再规划 "
                     f"→ ({x:.2f},{y:.2f})"
                 )
-            if not self.navigate(x, y, yaw, timeout=timeout):
+            # 取货：位置到了就取消导航，不要在朝向对齐里一直停着
+            if not self.navigate(
+                x,
+                y,
+                yaw,
+                timeout=timeout,
+                early_xy_tol=stay_if_xy,
+                soft_start=True,
+            ):
+                cur_hold = self.get_base_xy_yaw_map()
+                if cur_hold is not None and stay_if_xy is not None:
+                    d_hold = math.hypot(cur_hold[0] - float(x), cur_hold[1] - float(y))
+                    if d_hold <= float(stay_if_xy):
+                        self.node.get_logger().info(
+                            f"NAV stay after fail dxy={d_hold:.3f} → 交给夹取"
+                        )
+                        self.stop_chassis()
+                        return True
                 self.node.get_logger().error(f"NAV attempt {i + 1}/{attempts} failed")
                 continue
             time.sleep(max(float(settle_sec) * 0.45, 0.04))
             self.stop_chassis()
             ok, why = self.pose_gate_ok(x, y, yaw, xy_tol=xy_tol, yaw_tol=yaw_tol)
             self.node.get_logger().info(why)
+            if not ok and stay_if_xy is not None:
+                cur_hold = self.get_base_xy_yaw_map()
+                if cur_hold is not None:
+                    d_hold = math.hypot(cur_hold[0] - float(x), cur_hold[1] - float(y))
+                    if d_hold <= float(stay_if_xy):
+                        self.node.get_logger().info(
+                            f"NAV xy ok dxy={d_hold:.3f} yaw交给视觉 → 停在取货点"
+                        )
+                        self.stop_chassis()
+                        return True
             if ok:
                 if reanchor:
                     # Pin AMCL to known goal — short settle (contest time)
@@ -721,11 +774,14 @@ class MotionHelpers:
     ) -> None:
         """Re-seed AMCL at a known map pose (like RViz 2D Pose Estimate).
 
-        Call after Nav2 arrives at a verified park/zone, and after local yaw
-        align, so the next NavigateToPose does not start from a skewed cloud.
-        Tight covariance + chassis stop first: office walls are ambiguous and
-        a spinning base right after /initialpose pulls the cloud away again.
+        No-op under Gazebo GT localization — map→odom is owned by gt_localization.
         """
+        if self.use_gt_localization:
+            self.node.get_logger().debug(
+                f"GT_LOC skip reanchor ({x:.2f},{y:.2f},yaw={yaw:.2f})"
+            )
+            time.sleep(min(0.02, max(float(settle_sec), 0.0)))
+            return
         self.stop_chassis(n=4)
         time.sleep(0.05)
         msg = PoseWithCovarianceStamped()
@@ -847,14 +903,15 @@ class MotionHelpers:
             msg = point_cloud2.create_cloud_xyz32(header, pts)
         self._keepout_pub.publish(msg)
 
-    def clear_costmaps(self, timeout: float = 1.5) -> None:
+    def clear_costmaps(self, timeout: float = 0.25) -> None:
         """Clear Nav2 costmaps so a skewed inflate cloud does not freeze the robot."""
         for name, cli in (
             ("local", self._clear_local_cli),
             ("global", self._clear_global_cli),
         ):
-            if not cli.wait_for_service(timeout_sec=0.3):
-                continue
+            if not cli.service_is_ready():
+                if not cli.wait_for_service(timeout_sec=0.1):
+                    continue
             try:
                 fut = cli.call_async(Empty.Request())
                 self._spin_until(fut, timeout)
@@ -878,7 +935,7 @@ class MotionHelpers:
             time.sleep(0.01)
         # After placing a cube, do NOT clear — keep laser marks so we don't plan over it
         if clear_maps:
-            self.clear_costmaps(timeout=0.25)
+            self.clear_costmaps(timeout=0.05)
 
     def stop_chassis(self, n: int = 2) -> None:
         tw = Twist()
@@ -903,7 +960,7 @@ class MotionHelpers:
             return
         try:
             fut = gh.cancel_goal_async()
-            self._spin_until(fut, 5.0)
+            self._spin_until(fut, 0.25)
         except Exception as exc:  # noqa: BLE001
             self.node.get_logger().warn(f"cancel_nav: {exc}")
 
@@ -919,6 +976,9 @@ class MotionHelpers:
 
     def _start_nomotion_heartbeat(self, period_sec: float = 1.0) -> None:
         self._stop_nomotion_heartbeat()
+        # GT localization does not use AMCL laser updates
+        if self.use_gt_localization:
+            return
         if not self._nomotion_cli.service_is_ready():
             self._nomotion_cli.wait_for_service(timeout_sec=0.4)
         self._request_nomotion_update()
@@ -939,6 +999,7 @@ class MotionHelpers:
     def enter_local_mode(self, settle_sec: float = 1.5) -> None:
         """Cancel Nav ownership of wheels; task_sm may publish cmd_vel."""
         self.cancel_nav()
+        self._clear_path_display()
         self.stop_chassis(n=2)
         # Cap settle — callers often pass legacy 0.08~1.5; contest wants snappy handoff
         time.sleep(min(0.06, max(float(settle_sec), 0.0)))
@@ -955,6 +1016,16 @@ class MotionHelpers:
         self.stop_chassis(n=1)
         self.drive_owner = "nav"
         self.node.get_logger().info("MODE_NAV (Nav2 owns cmd_vel)")
+
+    def _clear_path_display(self) -> None:
+        """Erase the global and local path already shown in RViz."""
+        empty = Path()
+        empty.header.frame_id = "map"
+        empty.header.stamp = self.node.get_clock().now().to_msg()
+        for _ in range(3):
+            self._plan_pub.publish(empty)
+            self._local_plan_pub.publish(empty)
+            time.sleep(0.02)
 
     def align_yaw_optional(
         self,
@@ -1317,19 +1388,19 @@ class MotionHelpers:
             f"CREEP → {color}_{cube_id} r={rng0:.2f}→≤{target_range:.2f}m "
             f"map=({mx:.2f},{my:.2f})"
         )
-        # Already in band — do not drive closer (overshoot kills FOV / under-chassis)
-        min_r = max(0.42, float(target_range) - 0.02)
+        # Already in band — stop. Only reverse if the body is actually on the cube.
+        floor_r = 0.32
         if float(rng0) <= float(target_range) + 0.04:
-            if float(rng0) < min_r:
+            if float(rng0) < floor_r:
                 self.node.get_logger().info(
-                    f"CREEP already too close r={rng0:.2f} → reverse to ≥{min_r:.2f}"
+                    f"CREEP on cube r={rng0:.2f} → reverse to ≥{floor_r:.2f}"
                 )
                 t_b = time.time()
-                while time.time() - t_b < 4.0:
+                while time.time() - t_b < 2.0:
                     rng, rem = _rng_yaw()
-                    if rng is None or float(rng) >= min_r:
+                    if rng is None or float(rng) >= floor_r:
                         break
-                    self.publish_cmd_vel(-0.14, 0.0)
+                    self.publish_cmd_vel(-0.10, 0.0)
                     time.sleep(0.06)
                 self.stop_chassis()
             else:
@@ -1354,34 +1425,23 @@ class MotionHelpers:
             if rng is None:
                 time.sleep(dt)
                 continue
-            # Passed the cube (range grew while driving forward) → reverse out
-            if float(rng) < min_r or (
-                rem is not None and abs(float(rem)) > 1.2 and float(rng) < 0.55
-            ):
+            if float(rng) < 0.32:
                 self.node.get_logger().warn(
-                    f"CREEP under/beside cube r={rng:.2f} → reverse"
+                    f"CREEP on cube r={rng:.2f} → short reverse"
                 )
                 t_b = time.time()
-                while time.time() - t_b < 3.5:
+                while time.time() - t_b < 2.0:
                     rng2, _ = _rng_yaw()
-                    if rng2 is None or float(rng2) >= float(target_range):
+                    if rng2 is None or float(rng2) >= 0.36:
                         break
-                    self.publish_cmd_vel(-0.16, 0.0)
+                    self.publish_cmd_vel(-0.10, 0.0)
                     time.sleep(dt)
                 self.stop_chassis()
-                rng, rem = _rng_yaw()
-                if rng is not None and float(rng) <= float(target_range) + 0.08:
-                    return True
-                continue
+                return True
             if rng <= float(target_range):
                 self.stop_chassis()
                 self.node.get_logger().info(f"CREEP_OK r={rng:.2f}m")
                 return True
-            # Overshoot guard: if we somehow got closer than min, reverse
-            if rng < float(target_range) - 0.06:
-                self.publish_cmd_vel(-0.12, 0.0)
-                time.sleep(dt)
-                continue
             wz = 0.0
             if rem is not None and abs(rem) > 0.08:
                 wz = float(max(-max_wz, min(max_wz, 1.0 * rem)))
@@ -1398,10 +1458,8 @@ class MotionHelpers:
             # Range increasing while we think we're approaching → stop (drove past)
             if float(rng) > last_rng + 0.08 and last_rng < float(target_range) + 0.25:
                 self.node.get_logger().warn(
-                    f"CREEP range rose {last_rng:.2f}→{rng:.2f} (past cube?) → reverse"
+                    f"CREEP range rose {last_rng:.2f}→{rng:.2f} (past cube?) → stop"
                 )
-                self.publish_cmd_vel(-0.14, 0.0)
-                time.sleep(0.35)
                 self.stop_chassis()
                 break
             last_rng = float(rng)
@@ -1820,19 +1878,27 @@ class MotionHelpers:
                     wz = float(max(-max_wz, min(max_wz, 0.75 * bearing)))
                 else:
                     wz = 0.0
-                if saw_blob:
-                    # Had cube, then lost → reverse back into FOV
+                if saw_blob and (
+                    rng_tf is None or float(rng_tf) > float(target_r) + 0.15
+                ):
+                    # Had cube, then lost while still far → reverse back into FOV
                     vx = -0.08
                     self.node.get_logger().info(
                         "OPENCV_ALIGN SEEK: 丢块 → 倒退回画面（禁止盲目前进）",
                         throttle_duration_sec=0.5,
                     )
+                else:
+                    vx = 0.0
 
             # Final FOV clamp: if we still see the cube on an edge, kill forward
             if blob is not None and err_u is not None and vx > 0.0:
                 cy_f = float(blob.cy) / float(max(blob.image_h, 1))
                 if abs(err_u) > 0.30 or cy_f > 0.86 or cy_f < 0.18:
                     vx = 0.0
+
+            # 到夹取距离就停，不要再开到物块身上
+            if rng_tf is not None and float(rng_tf) <= float(target_r) + 0.02:
+                vx = min(0.0, vx)
 
             yaw_ok = err_u is not None and abs(err_u) <= max(err_ok, 0.14)
             rng_gate = float(target_r) + 0.08
@@ -2460,11 +2526,13 @@ class MotionHelpers:
         return True
 
     def arm_carry_pose(self, j1: float = 0.0) -> bool:
-        """Lift from PICK then tuck (faster ~20%)."""
+        """Lift from PICK clear of floor, then return to boot HOME."""
         j1 = float(j1)
         pick = list(PICK)
         pick[0] = j1
-        self.node.get_logger().info("ARM carry pose (快速抬起)")
+        home = list(HOME)
+        home[0] = 0.0
+        self.node.get_logger().info("ARM carry → HOME (与开机姿态相同)")
         self._cancel_arm_goal()
         time.sleep(0.02)
         ok = self._send_traj(
@@ -2472,22 +2540,23 @@ class MotionHelpers:
             ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
             [
                 (pick, 0.05, 0),
-                ([j1, 0.70, 1.05, 0.0, -0.55, 0.0], 0.18, 0),
-                ([0.0, 0.25, 1.20, 0.0, -1.00, 0.0], 0.38, 0),
+                # Clear cube off the floor before folding
+                ([j1, 0.55, 0.85, 0.0, -0.35, 0.0], 0.20, 0),
+                (home, 0.45, 0),
             ],
-            timeout=1.7,
+            timeout=1.8,
         )
         if ok:
             return True
-        self.node.get_logger().warn("ARM carry failed → cancel+retry")
+        self.node.get_logger().warn("ARM carry failed → cancel+retry HOME")
         self._cancel_arm_goal()
         time.sleep(0.02)
         ok2 = self._send_traj(
             self.arm,
             ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
             [
-                ([0.0, 0.50, 1.00, 0.0, -0.60, 0.0], 0.16, 0),
-                ([0.0, 0.20, 1.20, 0.0, -1.00, 0.0], 0.40, 0),
+                ([0.0, 0.40, 0.70, 0.0, -0.30, 0.0], 0.16, 0),
+                (list(HOME), 0.40, 0),
             ],
             timeout=1.5,
         )
@@ -2500,33 +2569,34 @@ class MotionHelpers:
         return True
 
     def arm_place_pose(self) -> bool:
-        """Lower toward ground before detach — EE ends ~PLACE_FRONT_M ahead of base."""
+        """From HOME, lower to place — EE ends ~PLACE_FRONT_M ahead of base."""
         self.node.get_logger().info(
-            f"ARM place pose (投放约前方 {PLACE_FRONT_M:.2f}m，快速)"
+            f"ARM place pose from HOME (投放约前方 {PLACE_FRONT_M:.2f}m)"
         )
         return self._send_traj(
             self.arm,
             ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
             [
-                ([0.0, 0.45, 0.85, 0.0, -0.50, 0.0], 0.11, 0),
-                (list(PLACE_FINAL), 0.34, 0),
+                (list(HOME), 0.05, 0),
+                ([0.0, 0.45, 0.85, 0.0, -0.50, 0.0], 0.16, 0),
+                (list(PLACE_FINAL), 0.36, 0),
             ],
-            timeout=1.4,
+            timeout=1.6,
         )
 
     def arm_lift_after_place(self) -> bool:
-        """Immediately tuck up after drop — no dwell."""
-        self.node.get_logger().info("ARM lift after place (马上抬起)")
+        """After drop, return to boot HOME — same joints as power-on."""
+        self.node.get_logger().info("ARM lift after place → HOME")
         self._cancel_arm_goal()
         ok = self._send_traj(
             self.arm,
             ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
             [
                 (list(PLACE_FINAL), 0.04, 0),
-                ([0.0, 0.45, 1.00, 0.0, -0.70, 0.0], 0.14, 0),
-                ([0.0, 0.15, 1.20, 0.0, -1.00, 0.0], 0.30, 0),
+                ([0.0, 0.40, 0.70, 0.0, -0.30, 0.0], 0.16, 0),
+                (list(HOME), 0.36, 0),
             ],
-            timeout=1.4,
+            timeout=1.5,
         )
         if not ok:
             self._cancel_arm_goal()
@@ -2539,8 +2609,8 @@ class MotionHelpers:
             self.arm,
             ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
             [
-                ([0.0, 0.25, 0.7, 0.0, -0.6, 0.0], 0.10, 0),
-                ([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 0.45, 0),
+                ([0.0, 0.25, 0.5, 0.0, -0.3, 0.0], 0.12, 0),
+                (list(HOME), 0.40, 0),
             ],
             timeout=1.6,
         )

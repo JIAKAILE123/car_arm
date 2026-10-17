@@ -8,7 +8,6 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(gazebo_dev REQUIRED)
 find_package(gazebo_ros REQUIRED)
-
 add_library(dyn_obs_mover SHARED src/dyn_obs_mover.cpp)
 target_include_directories(dyn_obs_mover PUBLIC ${GAZEBO_INCLUDE_DIRS})
 target_link_libraries(dyn_obs_mover ${GAZEBO_LIBRARIES})

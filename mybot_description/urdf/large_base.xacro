@@ -19,7 +19,8 @@
 
     <xacro:property name="wheel_joint_x" value="0.14" />
     <xacro:property name="wheel_joint_y" value="0.38" />
-    <xacro:property name="wheel_joint_z" value="0.035" />
+    <!-- 比万向轮着地点低约 2 mm，直线时驱动轮吃到重量。0.035 时轮底悬空，只有转弯压轮才快 -->
+    <xacro:property name="wheel_joint_z" value="0.040" />
 
     <!-- 支撑轮 -->
     <xacro:property name="caster_mass" value="0.4" />

@@ -381,16 +381,18 @@ def approach_xy_for_cube(
         so_b = max(so, 0.60)
         cid = int(cube_id)
 
-        # blue#5 southern corridor. Park NORTH (farther) face south — never drive
-        # over the cube (under-chassis FOV miss). Leave space to reverse after pick.
+        # blue#1 / #3: park WEST, face +X (camera on cube, clear of neighbors).
+        if cid in (1, 3):
+            ax, ay = float(cx) - so_b, float(cy)
+            return ax, ay, _face(ax, ay)
+
+        # blue#5 near zone B south — park NORTH, face south.
         if cid == 5:
             so5 = max(so_b, 0.72)
             ax, ay = float(cx), float(cy) + so5
             return ax, ay, _face(ax, ay)
 
-        # blue#4 at (2.2,-5.1) SE of zone B. South park forces a path that
-        # crosses the cube (from B) → cube ends under the chassis / FOV dead.
-        # Always park WEST, face +X — approach from B goes south, cube stays ahead.
+        # blue#4: park WEST (x−), face +X toward the cube.
         if cid == 4:
             so4 = max(so_b, 0.70)
             ax, ay = float(cx) - so4, float(cy)
@@ -417,14 +419,17 @@ def approach_xy_for_cube(
     so_r = max(float(standoff_m), 0.55)
     cid = int(cube_id)
 
-    # red#2 at (0,-4.2) sits next to zone B (1.5,-4). East park lands in B
-    # keepout/inflation → Nav stops wrong / cam misses. Always park WEST.
+    # red#2: always park EAST (x+) so Nav2 does not cross over the cube.
     if cid == 2:
+        ax, ay = float(cx) + so_r, float(cy)
+        return ax, ay, _face(ax, ay)
+
+    # red#1 near blue#3 / zone A — park WEST.
+    if cid == 1:
         ax, ay = float(cx) - so_r, float(cy)
         return ax, ay, _face(ax, ay)
 
-    # red#4 leftmost (x≈-4.7): west park hugs wall → FOV drift. Always park EAST.
-    # Same distance as others (was 0.70 → “离很远才夹”).
+    # red#4 south-east of cluster — park EAST (open side).
     if cid == 4:
         ax, ay = float(cx) + so_r, float(cy)
         return ax, ay, _face(ax, ay)
@@ -517,22 +522,20 @@ def ee_to_pose_distance_m(tf_buffer: Buffer, pose_arm: PoseStamped) -> Optional[
     return float(np.sqrt(dx * dx + dy * dy + dz * dz))
 
 
-# Layout: mid corridors + dyn_obs (E-W). Cubes/obs kept off walls; ≥2m cube spacing.
+# Compact cluster west of mid-wall: zones + mixed red/blue so any 5-pick
+# tour (random colors/zones) keeps a short worst-case path. Zone A sits
+# just south of blue#3.
 _KNOWN_CUBES = {
-    ("red", 1): (1.00, -9.00, 0.015),
-    ("red", 2): (0.00, -4.20, 0.015),
-    ("red", 3): (-2.80, -4.90, 0.015),
-    ("red", 4): (-4.70, -5.25, 0.015),
-    ("red", 5): (1.80, 0.40, 0.015),
-    # Was (2.45,-2.45) against east furniture/wall — moved inward
-    ("blue", 1): (1.60, -2.50, 0.015),
-    # Was in west room; now north open corridor (away from walls)
-    ("blue", 2): (-3.00, 2.10, 0.015),
-    # Was (-4.0,-0.4) in doorway — open corridor
-    ("blue", 3): (-2.50, -1.80, 0.015),
-    ("blue", 4): (2.20, -5.10, 0.015),
-    # Was (0.54,-11.22) against south wall — then -9.80; user: y-=1 → -10.80
-    ("blue", 5): (1.00, -10.80, 0.015),
+    ("red", 1): (0.80, 0.20, 0.015),
+    ("red", 2): (-5.20, 0.00, 0.015),
+    ("red", 3): (-1.00, -3.80, 0.015),
+    ("red", 4): (1.40, -4.60, 0.015),
+    ("red", 5): (-5.20, -7.10, 0.015),
+    ("blue", 1): (0.60, -2.20, 0.015),
+    ("blue", 2): (-0.60, 1.90, 0.015),
+    ("blue", 3): (6.20, -2.60, 0.015),
+    ("blue", 4): (-7.70, -3.00, 0.015),
+    ("blue", 5): (-0.60, -8.30, 0.015),
 }
 
 def known_cube_xy(color: str, cube_id: int):

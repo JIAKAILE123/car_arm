@@ -5,8 +5,8 @@
   <BehaviorTree ID="MainTree">
     <RecoveryNode number_of_retries="12" name="NavigateRecovery">
       <PipelineSequence name="NavigateWithReplanning">
-        <!-- 更快重规划：障碍杆横移后路径及时改道，减少对向相撞 -->
-        <RateController hz="2.0">
+        <!-- 0.5Hz：路径别老改，否则 FollowPath 一直被打断 → 慢倒/不转弯 -->
+        <RateController hz="0.5">
           <RecoveryNode number_of_retries="2" name="ComputePathToPose">
             <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
             <ClearEntireCostmap name="ClearGlobal" service_name="global_costmap/clear_entirely_global_costmap"/>
@@ -16,11 +16,11 @@
         <RecoveryNode number_of_retries="4" name="FollowPath">
           <FollowPath path="{path}" controller_id="FollowPath"/>
           <Sequence name="UnstickLocal">
-            <!-- About to hit / stuck: stop (no cmd), wait, back off, clear, replan -->
-            <Wait wait_duration="0.40"/>
+            <!-- Stuck: brief pause, back off, clear, replan (keep waits short) -->
+            <Wait wait_duration="0.12"/>
             <BackUp backup_dist="0.28" backup_speed="0.12"/>
             <ClearEntireCostmap name="ClearLocal" service_name="local_costmap/clear_entirely_local_costmap"/>
-            <Wait wait_duration="0.25"/>
+            <Wait wait_duration="0.10"/>
           </Sequence>
         </RecoveryNode>
       </PipelineSequence>

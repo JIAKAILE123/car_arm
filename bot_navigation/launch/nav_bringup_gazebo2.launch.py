@@ -31,7 +31,8 @@ def generate_launch_description():
         replacements={'<nav_bt_xml>': default_bt_xml},
     )
     slam = LaunchConfiguration('slam', default='False')
-    rviz_config_dir = os.path.join(nav2_bringup_dir, 'rviz', 'nav2_default_view.rviz')
+    # 包内 RViz：与原版一致，仅关掉 LaserScan 红点；地图/膨胀等全开
+    rviz_config_dir = os.path.join(navigation2_dir, 'rviz', 'nav2_default_view.rviz')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -82,6 +83,19 @@ def generate_launch_description():
                 'rate_hz': 10.0,
             }],
         ),
+        # map→odom = I；位姿来自 Gazebo WORLD /odom → EKF（AMCL 不广播 TF）
+        Node(
+            package='yzbot_task',
+            executable='gt_localization',
+            name='gt_localization',
+            output='screen',
+            parameters=[{
+                'use_sim_time': use_sim_time,
+                'robot_model': 'six_arm',
+                'rate_hz': 30.0,
+                'publish_amcl_pose': True,
+            }],
+        ),
         Node(
             package='rviz2',
             executable='rviz2',
@@ -90,5 +104,4 @@ def generate_launch_description():
             parameters=[{'use_sim_time': use_sim_time}],
             output='screen',
         ),
-        # NOTE: do NOT periodically clear local costmap — it makes AMCL/nav “飘”
     ])

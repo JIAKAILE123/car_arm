@@ -33,6 +33,9 @@
 
     <gazebo reference="back_caster_link">
         <material>Gazebo/Black</material>
+        <!-- 固定球没有转向轴，摩擦一大，过弯会把前进速度拖掉 -->
+        <mu1>0.05</mu1>
+        <mu2>0.05</mu2>
     </gazebo>
 
     <xacro:wheel_transmission prefix="left" />
@@ -45,11 +48,12 @@
             <update_rate>30</update_rate>
             <left_joint>left_wheel_joint</left_joint>
             <right_joint>right_wheel_joint</right_joint>
-            <wheel_separation>${wheel_joint_y*2}</wheel_separation>
+            <!-- 左右轮中心距，不用 wheel_joint_y*2（那是 0.76，实际只有 0.37，转弯会差一倍） -->
+            <wheel_separation>${base_width + wheel_length}</wheel_separation>
             <wheel_diameter>${2*wheel_radius}</wheel_diameter>
-            <!-- mass≈18 needs more torque than backup's 10 -->
             <max_wheel_torque>35</max_wheel_torque>
-            <max_wheel_acceleration>1.5</max_wheel_acceleration>
+            <!-- 线加速度 m/s²。4 时两轮一起加速爬不到直线指令，转弯单轮差速反而显得快 -->
+            <max_wheel_acceleration>10.0</max_wheel_acceleration>
             <command_topic>cmd_vel</command_topic>
             <publish_odom>true</publish_odom>
             <!-- Only EKF publishes odom→base_footprint TF -->

@@ -4,7 +4,9 @@ ekf_filter_node:
     frequency: 30.0
     sensor_timeout: 0.5
     two_d_mode: true
-    # Gazebo publishes /odom only; EKF alone publishes odom→base_footprint TF.
+    # Gazebo diff_drive odometry_source=WORLD → /odom pose is already world GT.
+    # Fuse absolute x/y/yaw (not twist-only), so odom→base == Gazebo pose.
+    # map→odom is identity (gt_localization); map frame == world.
     publish_tf: true
     map_frame: map
     odom_frame: odom
@@ -13,8 +15,11 @@ ekf_filter_node:
 
     odom0: /odom
     odom0_queue_size: 20
-    odom0_config: [false, false, false,
-                   false, false, false,
+    # x, y, yaw absolute + vx, vy, vyaw
+    odom0_config: [true,  true,  false,
+                   false, false, true,
                    true,  true,  false,
                    false, false, true,
                    false, false, false]
+    odom0_differential: false
+    odom0_relative: false
