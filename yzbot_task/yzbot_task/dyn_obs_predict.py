@@ -22,9 +22,9 @@ from std_msgs.msg import Header
 # axis 'y': y = mid + amp*sin, x fixed
 # tuple: (axis, fixed, mid, amp, phase, period, half_x, half_y)
 _OBS = (
-    ("x", -1.35, -0.80, 1.95, 0.0, 23.0, 0.252, 0.26),
-    ("x", -6.15, -0.65, 1.65, 1.2, 25.67, 0.252, 0.26),
-    ("y", -2.00, 0.00, 2.50, 2.4, 40.0, 0.252, 0.26),
+    ("x", -1.35, -0.80, 1.95, 0.0, 31.0, 0.252, 0.26),
+    ("x", -6.15, -0.65, 1.65, 1.2, 33.67, 0.252, 0.26),
+    ("y", -2.00, 0.00, 2.50, 2.4, 45.0, 0.252, 0.26),
 )
 
 
@@ -32,7 +32,7 @@ class DynObsPredict(Node):
     def __init__(self) -> None:
         super().__init__("dyn_obs_predict")
         # 仅加强杆预测；不改 DWB/膨胀（避免物块旁空转）
-        self.declare_parameter("horizon_sec", 2.6)
+        self.declare_parameter("horizon_sec", 2.2)
         self.declare_parameter("dt_sec", 0.20)
         self.declare_parameter("rate_hz", 10.0)
         self.declare_parameter("step_m", 0.07)

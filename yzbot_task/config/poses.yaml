@@ -29,8 +29,9 @@ zone_c:
   y: -2.90
   yaw: 0.0
 
-# Pre-match mapping (example from rules PDF):
-#   x→red, y→blue; count≥threshold → high_zone; else → low_zone
+# Pre-match mapping (rules / 讲解 PDF):
+#   正式赛：x≥1、y≥1 且 x+y=5
+#   映射例：x→red, y→blue；数量≥3 → A，否则 → C（门槛是≥3，不是>0/>1）
 mapping:
   x_color: red
   y_color: blue

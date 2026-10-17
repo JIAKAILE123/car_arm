@@ -90,57 +90,59 @@ controller_server:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
       xy_goal_tolerance: 0.32
-      yaw_goal_tolerance: 0.40
+      # 到点勿死磕朝向；本地 FACE/DOCK 再细调
+      yaw_goal_tolerance: 0.85
 
     # Line speed kept; yaw slowed — fast spin was skewing Nav / AMCL
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
       debug_trajectory_details: False
       # 允许小幅倒车，否则卡住时只能靠 BackUp 恢复 → 慢倒且不转弯
-      min_vel_x: -1.0
+      min_vel_x: -3.0
       min_vel_y: 0.0
-      max_vel_x: 2.0
+      max_vel_x: 3.0
       max_vel_y: 0.0
-      max_vel_theta: 1.0
+      # 线速度保持；角速度压低 → 到点少拧圈
+      max_vel_theta: 0.55
       min_speed_xy: 0.0
-      max_speed_xy: 2.0
+      max_speed_xy: 3.0
       min_speed_theta: 0.0
-      acc_lim_x: 1.70
+      acc_lim_x: 2.4
       acc_lim_y: 0.0
-      acc_lim_theta: 0.95
-      decel_lim_x: -1.70
+      acc_lim_theta: 0.50
+      decel_lim_x: -2.4
       decel_lim_y: 0.0
-      decel_lim_theta: -0.95
+      decel_lim_theta: -0.50
       vx_samples: 20
       vy_samples: 1
       vtheta_samples: 20
-      # 前瞻缩短：靠近物块/墙时少误减速
-      sim_time: 0.9
+      # 高速前瞻加长：少短视拧弯，贴轨靠弱化 PathAlign/PathDist
+      sim_time: 1.4
       sim_granularity: 0.05
       angular_sim_granularity: 0.08
       xy_goal_tolerance: 0.34
-      yaw_goal_tolerance: 0.32
+      yaw_goal_tolerance: 0.80
       transform_tolerance: 0.3
       prune_plan: true
       prune_distance: 1.5
       critics: ["RotateToGoal", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
       RotateToGoal:
         enabled: true
-        scale: 2.0
-        slowing_factor: 3.0
+        scale: 0.7
+        slowing_factor: 8.0
       BaseObstacle:
         enabled: true
         # 略加强对预测杆；勿过高，否则物块旁空转找不到
         scale: 36.0
       GoalAlign:
         enabled: true
-        scale: 3.5
+        scale: 2.2
       PathAlign:
         enabled: true
-        scale: 16.0
+        scale: 8.0
       PathDist:
         enabled: true
-        scale: 20.0
+        scale: 12.0
       GoalDist:
         enabled: true
         scale: 24.0
@@ -237,7 +239,8 @@ global_costmap:
         observation_persistence: 0.0
         expected_update_rate: 0.0
         combination_method: 1
-        observation_sources: scan zone_keepout dyn_obs_predict
+        # 全局不画动障预测：NavFn 走短几何路；近处由 local + dyn_obs_predict 躲杆
+        observation_sources: scan zone_keepout
         scan:
           topic: /scan
           max_obstacle_height: 2.0
@@ -260,17 +263,6 @@ global_costmap:
           raytrace_max_range: 0.0
           raytrace_min_range: 0.0
           observation_persistence: 4.0
-        dyn_obs_predict:
-          topic: /yzbot/dyn_obs_predict
-          max_obstacle_height: 2.0
-          clearing: False
-          marking: True
-          data_type: "PointCloud2"
-          obstacle_max_range: 100.0
-          obstacle_min_range: 0.0
-          raytrace_max_range: 0.0
-          raytrace_min_range: 0.0
-          observation_persistence: 0.40
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -370,10 +362,10 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [2.0, 0.0, 1.0]
-    min_velocity: [-1.0, 0.0, -1.0]
-    max_accel: [1.40, 0.0, 0.90]
-    max_decel: [-1.60, 0.0, -0.90]
+    max_velocity: [3.0, 0.0, 0.55]
+    min_velocity: [-3.0, 0.0, -0.55]
+    max_accel: [2.2, 0.0, 0.50]
+    max_decel: [-2.2, 0.0, -0.50]
     odom_topic: "odometry/filtered"
     odom_duration: 0.12
     deadband_velocity: [0.0, 0.0, 0.0]

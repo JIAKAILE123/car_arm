@@ -77,6 +77,35 @@ def test_llm_solver_local_backend():
     assert cmd == "[red,4,A;blue,1,C]"
 
 
+def test_direct_command_chinese():
+    from yzbot_task.local_solver import try_parse_direct_command
+
+    cmd, x, y = try_parse_direct_command("5个红色物块，去A区")
+    assert cmd == "[red,5,A]" and (x, y) == (5, 0)
+    cmd, x, y = try_parse_direct_command("抓取两个蓝色到C区")
+    assert cmd == "[blue,2,C]" and (x, y) == (0, 2)
+    cmd, x, y = question_to_command_llm("5个红色物块，去A区", backend="local")
+    assert cmd == "[red,5,A]" and (x, y) == (5, 0)
+    # Official word problems still use ceil + zone map
+    assert try_parse_direct_command(
+        "题目: 每个衣柜有5件衣物;小娜需要2件T恤,1条裤子。"
+    ) is None
+
+
+def test_official_xy_and_zone_threshold():
+    from yzbot_task.local_solver import is_official_xy, map_xy_to_tasks
+
+    assert is_official_xy(4, 1) and is_official_xy(2, 3)
+    assert not is_official_xy(5, 0) and not is_official_xy(3, 3)
+    # 规则例：≥3→A，否则 C（不是 >0 / >1）
+    tasks = map_xy_to_tasks(4, 1)
+    assert str(tasks[0]) == "red,4,A" and str(tasks[1]) == "blue,1,C"
+    tasks = map_xy_to_tasks(2, 3)
+    assert str(tasks[0]) == "red,2,C" and str(tasks[1]) == "blue,3,A"
+    tasks = map_xy_to_tasks(1, 1)  # 都 <3 → 双 C
+    assert str(tasks[0]) == "red,1,C" and str(tasks[1]) == "blue,1,C"
+
+
 def test_format_roundtrip():
     tasks = parse_command("[red,1,A]")
     assert format_command(tasks) == "[red,1,A]"

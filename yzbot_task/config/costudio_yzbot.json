@@ -273,12 +273,12 @@
       "foxglovePanelTitle": "3D状态显示"
     },
     "Publish!20rffgt": {
-      "buttonText": "Publish",
-      "buttonTooltip": "",
+      "buttonText": "提交题目→大模型解题",
+      "buttonTooltip": "只改引号里的中文题干，外面 { \"data\": \"...\" } 不要删。点提交 → /exam_question。空格出题用 6-Exam 终端。",
       "advancedView": true,
-      "value": "{\n  \"data\": \"抓取两个蓝色到A 区\"\n}",
-      "foxglovePanelTitle": "对话框",
-      "topicName": "/chat",
+      "value": "{\n  \"data\": \"5个红色物块，去A区\"\n}",
+      "foxglovePanelTitle": "②粘贴题目解题（只改引号内文字）",
+      "topicName": "/exam_question",
       "datatype": "std_msgs/String"
     },
     "Image!1p1fyg9": {
@@ -524,42 +524,47 @@
     },
     "second": {
       "direction": "column",
-      "splitPercentage": 55,
-      "first": {
-        "direction": "column",
-        "splitPercentage": 50,
-        "first": {
-          "direction": "row",
-          "first": "RawMessages!viz_q",
-          "second": "RawMessages!viz_c"
-        },
-        "second": {
-          "direction": "row",
-          "first": "RawMessages!viz_o",
-          "second": "RawMessages!viz_p"
-        }
-      },
+      "splitPercentage": 22,
+      "first": "Publish!20rffgt",
       "second": {
         "direction": "column",
-        "splitPercentage": 40,
+        "splitPercentage": 55,
         "first": {
-          "direction": "column",
-          "splitPercentage": 35,
-          "first": "RawMessages!viz_t",
-          "second": "RawMessages!viz_w"
-        },
-        "second": {
           "direction": "column",
           "splitPercentage": 50,
           "first": {
             "direction": "row",
-            "first": "Indicator!3c2k9pj",
-            "second": "Indicator!s4663u"
+            "first": "RawMessages!viz_q",
+            "second": "RawMessages!viz_c"
           },
           "second": {
             "direction": "row",
-            "first": "Indicator!2lw9qd9",
-            "second": "Indicator!3cv0og"
+            "first": "RawMessages!viz_o",
+            "second": "RawMessages!viz_p"
+          }
+        },
+        "second": {
+          "direction": "column",
+          "splitPercentage": 40,
+          "first": {
+            "direction": "column",
+            "splitPercentage": 35,
+            "first": "RawMessages!viz_t",
+            "second": "RawMessages!viz_w"
+          },
+          "second": {
+            "direction": "column",
+            "splitPercentage": 50,
+            "first": {
+              "direction": "row",
+              "first": "Indicator!3c2k9pj",
+              "second": "Indicator!s4663u"
+            },
+            "second": {
+              "direction": "row",
+              "first": "Indicator!2lw9qd9",
+              "second": "Indicator!3cv0og"
+            }
           }
         }
       }

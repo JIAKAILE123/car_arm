@@ -6,7 +6,17 @@ from typing import Dict, Optional, Tuple
 
 from yzbot_task.command_parser import format_command
 from yzbot_task.deepseek_client import solve_xy_deepseek
-from yzbot_task.local_solver import map_xy_to_tasks, solve_xy_from_question
+from yzbot_task.local_solver import (
+    is_official_xy,
+    map_xy_to_tasks,
+    solve_xy_from_question,
+    try_parse_direct_command,
+)
+
+_OFFICIAL_XY_HINT = (
+    "\n请仔细复核：正式赛 x≥1、y≥1 且 x+y=5；"
+    "都需要/都领养必须×人数；ceil(14/5)=3。只输出 JSON。"
+)
 
 
 def solve_xy(
@@ -27,13 +37,29 @@ def solve_xy(
     if b == "local":
         return solve_xy_from_question(question)
     if b == "deepseek":
-        return solve_xy_deepseek(
+        xy = solve_xy_deepseek(
             question,
             api_key=api_key,
             base_url=base_url,
             model=model,
             timeout_sec=timeout_sec,
         )
+        if is_official_xy(*xy):
+            return xy
+        # 正式赛约束不满足时再催一次
+        try:
+            xy2 = solve_xy_deepseek(
+                question + _OFFICIAL_XY_HINT,
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                timeout_sec=timeout_sec,
+            )
+            if is_official_xy(*xy2):
+                return xy2
+        except Exception:
+            pass
+        return xy
     if b in ("auto", "cross"):
         local_xy = None
         try:
@@ -53,18 +79,25 @@ def solve_xy(
                 return local_xy
             raise
         if local_xy is None:
-            return llm_xy
+            if is_official_xy(*llm_xy):
+                return llm_xy
+            try:
+                llm2 = solve_xy_deepseek(
+                    question + _OFFICIAL_XY_HINT,
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    timeout_sec=timeout_sec,
+                )
+                return llm2
+            except Exception:
+                return llm_xy
         if llm_xy == local_xy:
             return llm_xy
-        # Mismatch: one retry with explicit reminder, then trust local
+        # Mismatch: one retry, then prefer local (尤其本地已满足正式赛约束时)
         try:
-            retry_q = (
-                question
-                + "\n请仔细复核：都需要/都领养必须×人数；ceil(14/5)=3。"
-                + "只输出 JSON。"
-            )
             llm2 = solve_xy_deepseek(
-                retry_q,
+                question + _OFFICIAL_XY_HINT,
                 api_key=api_key,
                 base_url=base_url,
                 model=model,
@@ -72,8 +105,14 @@ def solve_xy(
             )
             if llm2 == local_xy:
                 return llm2
+            if is_official_xy(*local_xy) and not is_official_xy(*llm2):
+                return local_xy
+            if is_official_xy(*llm2) and not is_official_xy(*local_xy):
+                return llm2
         except Exception:
             pass
+        if is_official_xy(*local_xy) and not is_official_xy(*llm_xy):
+            return local_xy
         return local_xy
     raise ValueError(f"unknown backend: {backend}")
 
@@ -88,7 +127,13 @@ def question_to_command_llm(
     model: str = "deepseek-chat",
     timeout_sec: float = 30.0,
 ) -> Tuple[str, int, int]:
-    """Return (task_command, x, y). Mapping is always applied locally."""
+    """Return (task_command, x, y). Mapping is always applied locally.
+
+    Direct robot phrases (「5个红色物块，去A区」) bypass ceil/zone mapping.
+    """
+    direct = try_parse_direct_command(question)
+    if direct is not None:
+        return direct
     mapping = mapping or {}
     x, y = solve_xy(
         question,

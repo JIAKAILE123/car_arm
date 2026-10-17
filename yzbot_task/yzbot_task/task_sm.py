@@ -86,9 +86,9 @@ class TaskStateMachine(Node):
         # OFF by default: continuous yaw IBVS made the car spin away
         self.declare_parameter("use_chassis_align", True)
         self.declare_parameter("align_timeout", 7.9)
-        self.declare_parameter("align_yaw_gain", 0.75)
-        # Local align yaw (before “slow search” cut to 0.10)
-        self.declare_parameter("align_max_wz", 0.24)
+        # 降增益/角速度：少拧过头再拧回（差速+脚轮惯性大）
+        self.declare_parameter("align_yaw_gain", 0.50)
+        self.declare_parameter("align_max_wz", 0.16)
         self.declare_parameter("local_settle_sec", 0.02)
         # Nav2 often stops ~0.5–0.8m short (inflation); soft gate then continuous local
         self.declare_parameter("pose_gate_xy", 0.55)
@@ -113,10 +113,13 @@ class TaskStateMachine(Node):
         # 沿长边(X≈1.0m)往区内收；短边(Y≈0.5m)只允许很小侧偏
         self.declare_parameter("place_inward_m", 0.18)
         self.declare_parameter("place_park_extra_m", 0.0)
-        # 投放末段：dock+转身后再用绿垫像素中心微调（最后1m，不在远处转弯时判）
+        # 放置视觉开着，但带门控：TF已在区内且绿垫不太偏 → 不动；只有明显偏才轻纠
         self.declare_parameter("place_vision_enable", True)
-        self.declare_parameter("place_vision_timeout", 4.0)
+        self.declare_parameter("place_vision_timeout", 2.8)
         self.declare_parameter("place_vision_target_cy", 0.58)
+        # 门阀：|err_u|/|err_v| 低于此认为「大概到位」，不启用视觉操控
+        self.declare_parameter("place_vision_gate_u", 0.22)
+        self.declare_parameter("place_vision_gate_v", 0.20)
         # known_coords = 按官方序号固定坐标：导航到物块前方 → 预设臂 → 吸附
         self.declare_parameter("grasp_mode", "known_coords")
         self.declare_parameter("prefer_joint_pick", True)
@@ -630,15 +633,18 @@ class TaskStateMachine(Node):
             )
             self.motion.exit_local_mode()
             retries = int(self.get_parameter("nav_retries").value)
+            # 目标 yaw=朝向块：Nav2 途中边走边转；XY+朝向够再早停
             nav_ok = self.motion.navigate_and_verify(
                 ax,
                 ay,
                 ayaw,
                 retries=retries,
                 xy_tol=xy_tol,
-                yaw_tol=yaw_tol,
+                yaw_tol=max(0.22, yaw_tol),
                 settle_sec=0.04,
                 reanchor=True,
+                stay_if_xy=max(0.30, xy_tol * 1.4),
+                early_yaw_tol=0.25,
             )
             if not nav_ok:
                 cur = self.motion.get_base_xy_yaw_map()
@@ -667,7 +673,7 @@ class TaskStateMachine(Node):
             self.motion.exit_local_mode()
             self._pub_status(
                 f"NAV_PICK_DIRECT → ({ax:.2f},{ay:.2f}) yaw={ayaw:.2f} "
-                f"(朝向物块)"
+                f"(朝向物块，边走边转)"
             )
             retries = int(self.get_parameter("nav_retries").value)
             nav_ok = self.motion.navigate_and_verify(
@@ -676,9 +682,11 @@ class TaskStateMachine(Node):
                 ayaw,
                 retries=retries,
                 xy_tol=xy_tol,
-                yaw_tol=yaw_tol,
+                yaw_tol=max(0.22, yaw_tol),
                 settle_sec=0.04,
                 reanchor=True,
+                stay_if_xy=max(0.30, xy_tol * 1.4),
+                early_yaw_tol=0.25,
             )
             if not nav_ok:
                 cur = self.motion.get_base_xy_yaw_map()
@@ -707,7 +715,7 @@ class TaskStateMachine(Node):
             self._pub_status(f"NAV_PICK_FAIL / TOO_FAR {color}_{cid}")
             return False
         self._pub_status(
-            f"NAV_PICK_OK → 本地: 转向识别+OpenCV贴框 "
+            f"NAV_PICK_OK → 本地: 补朝向(若需要)+OpenCV贴框 "
             f"(park≈{float(self.get_parameter('grasp_standoff_m').value):.2f}m)"
         )
         return True
@@ -853,11 +861,11 @@ class TaskStateMachine(Node):
         manage_mode=False: 调用方已在 MODE_LOCAL，不进出模式、不长时间 settle（流畅串联）。
         """
         settle = float(self.get_parameter("local_settle_sec").value)
-        # Face-turn: a bit faster than fine OpenCV align
-        max_wz = max(0.22, float(self.get_parameter("align_max_wz").value))
-        yaw_gain = max(0.85, float(self.get_parameter("align_yaw_gain").value))
+        # 与视觉对齐同档角速度，禁止再抬高（否则 Nav 后二次拧圈）
+        max_wz = min(0.18, float(self.get_parameter("align_max_wz").value))
+        yaw_gain = min(0.55, float(self.get_parameter("align_yaw_gain").value))
         mx, my, _mz = known_cube_xy(color, cid)
-        tol = 0.12
+        tol = 0.16  # 略松：到向即可，留给视觉细调
 
         if manage_mode:
             self.motion.enter_local_mode(settle_sec=min(0.03, settle))
@@ -1733,20 +1741,38 @@ class TaskStateMachine(Node):
                         return _scan(11.0, 0.34, 10.0)
 
                     _unbury_if_under()
-                    seen0 = _see_now()
-                    if seen0:
-                        self._pub_status(
-                            f"SEE_OK {color}_{cid} → 跳过 map 拧头，直接视觉快贴"
+                    # Nav 已带目标朝向边走边转；仅剩大偏差才本地补拧，再视觉
+                    cur_f = self.motion.get_base_xy_yaw_map()
+                    need_face = True
+                    if cur_f is not None:
+                        yaw_des = math.atan2(
+                            my - float(cur_f[1]), mx - float(cur_f[0])
                         )
-                    else:
-                        # 未见才按 map 转向 + 扫描（避免发呆 TF 上拧歪）
+                        rem_f = abs(
+                            self.motion._wrap_pi(yaw_des - float(cur_f[2]))
+                        )
+                        need_face = rem_f > 0.22  # ~12°
+                    if need_face:
+                        self._pub_status(
+                            f"FACE_TOPUP {color}_{cid} → Nav后补朝向再视觉"
+                        )
                         self._face_cube_yaw(
                             color, cid, manage_mode=False, reanchor=False
                         )
-                        seen0 = _see_now()
+                        self.motion.stop_chassis()
+                        time.sleep(0.04)
+                    else:
+                        self._pub_status(
+                            f"FACE_SKIP {color}_{cid} → Nav途中已对准"
+                        )
+                    seen0 = _see_now()
+                    if seen0:
+                        self._pub_status(
+                            f"SEE_OK {color}_{cid} → 视觉贴近"
+                        )
                     if not seen0:
-                        self._pub_status("SCAN_MAP 强视觉搜索（未见色块）")
-                        seen0 = _scan(11.0, 0.32, 10.0)
+                        self._pub_status("SCAN_MAP 未见 → 扫描")
+                        seen0 = _scan(11.0, 0.28, 10.0)
                     if not seen0:
                         seen0 = _recover_see()
                     if not seen0:
@@ -1784,7 +1810,7 @@ class TaskStateMachine(Node):
                         max_wz=min(
                             0.22, float(self.get_parameter("align_max_wz").value)
                         ),
-                        max_vx=0.22 if seen0 else 0.18,
+                        max_vx=0.28 if seen0 else 0.22,
                         timeout=oc_timeout,
                         stable_hold_sec=0.10,
                         lock_v_frac=float(self.get_parameter("lock_v_frac").value),
@@ -2049,7 +2075,11 @@ class TaskStateMachine(Node):
         front_m: float = 0.38,
         park_m: Optional[float] = None,
     ) -> None:
-        """沿长边推进绿垫；短边只允许很小侧偏。朝向大致对着即可。"""
+        """放置专用：弧线进区（可边走边轻微转弯），取货逻辑不动。
+
+        偏角大 → 多转少走；大致对准 → 快走 + 轻 wz。
+        避免旧版「弱 wz + 强前进」蹭垫边，也不强制停车纯直行。
+        """
         settle = float(self.get_parameter("local_settle_sec").value)
         arm_m = float(front_m)
         so = max(0.28, float(park_m) if park_m is not None else arm_m)
@@ -2057,9 +2087,6 @@ class TaskStateMachine(Node):
         if cur is None:
             return
         rx, ry = float(cur[0]), float(cur[1])
-        from_west = (rx - (float(zx) - 0.1)) ** 2 <= (
-            rx - (float(zx) + 0.1)
-        ) ** 2
         cands = [
             (float(zx) - so, float(zy), 0.0),
             (float(zx) + so, float(zy), math.pi),
@@ -2069,19 +2096,18 @@ class TaskStateMachine(Node):
         )
         from_west = abs(px - (float(zx) - so)) < abs(px - (float(zx) + so))
         self._pub_status(
-            f"PLACE_DOCK 长边进区/短边对齐 → park=({px:.2f},{py:.2f}) "
-            f"目标=({zx:.2f},{zy:.2f}) from={'W' if from_west else 'E'}"
+            f"PLACE_DOCK 弧线进区 → park=({px:.2f},{py:.2f}) "
+            f"区=({zx:.2f},{zy:.2f}) from={'W' if from_west else 'E'}"
         )
         self.motion.exit_local_mode()
         d_park = math.hypot(px - rx, py - ry)
-        if d_park > 0.12:
-            hold = float(cur[2])
+        if d_park > 0.14:
             self.motion.navigate(
                 px,
                 py,
-                hold,
+                float(pyaw),
                 timeout=22.0,
-                early_xy_tol=0.18,
+                early_xy_tol=0.20,
                 soft_start=True,
             )
             time.sleep(0.03)
@@ -2089,104 +2115,85 @@ class TaskStateMachine(Node):
 
         self.motion.enter_local_mode(settle_sec=min(0.04, settle))
         try:
-            # 1) 大偏差才粗转；不强制完全垂直短边
-            c0 = self.motion.get_base_xy_yaw_map()
-            if c0 is not None:
-                face = math.atan2(
-                    float(zy) - float(c0[1]), float(zx) - float(c0[0])
-                )
-                rem = self.motion._wrap_pi(face - float(c0[2]))
-                if abs(rem) > 0.50:
+
+            def _pred_drop():
+                c = self.motion.get_base_xy_yaw_map()
+                if c is None:
+                    return None
+                yaw = float(c[2])
+                fx = float(c[0]) + arm_m * math.cos(yaw)
+                fy = float(c[1]) + arm_m * math.sin(yaw)
+                return float(c[0]), float(c[1]), yaw, fx, fy
+
+            def _heading_rem(bx: float, by: float, yaw: float) -> float:
+                face = math.atan2(float(zy) - by, float(zx) - bx)
+                return self.motion._wrap_pi(face - yaw)
+
+            # 只在差很多时先粗转一下（不必拧到完全正）
+            pred0 = _pred_drop()
+            if pred0 is not None:
+                rem0 = _heading_rem(pred0[0], pred0[1], pred0[2])
+                if abs(rem0) > 0.40:
                     self._pub_status(
-                        f"PLACE_DOCK 粗转{abs(rem)*180/math.pi:.0f}°"
+                        f"PLACE_FACE 粗转{abs(rem0)*180/math.pi:.0f}°"
                     )
                     self.motion.spin_yaw_openloop(
-                        float(rem), max_wz=0.26, timeout=2.0
+                        float(rem0), max_wz=0.22, timeout=2.2
                     )
                     self.motion.stop_chassis()
                     time.sleep(0.03)
 
-            # 2) 闭环：长边(前进)为主，短边(侧偏)弱纠
+            self._pub_status("PLACE_ARC 边走边轻转进区")
             t0 = time.time()
-            while time.time() - t0 < 6.0:
-                c = self.motion.get_base_xy_yaw_map()
-                if c is None:
+            while time.time() - t0 < 5.5:
+                pred = _pred_drop()
+                if pred is None:
                     break
-                bx, by, yaw = float(c[0]), float(c[1]), float(c[2])
-                fx = bx + arm_m * math.cos(yaw)
-                fy = by + arm_m * math.sin(yaw)
-                ex = float(zx) - fx
-                ey = float(zy) - fy
-                if self._drop_inside_pad(
-                    fx, fy, zx, zy, from_west=from_west
-                ) and math.hypot(ex, ey) <= 0.12:
-                    break
-                ex_b = math.cos(yaw) * ex + math.sin(yaw) * ey
-                ey_b = -math.sin(yaw) * ex + math.cos(yaw) * ey
-                # 短边侧偏：wz 更积极一点，避免贴短边外
-                vx = max(-0.02, min(0.22, 1.25 * ex_b))
-                wz = max(-0.12, min(0.12, 1.1 * ey_b))
-                # 仍在短边外侧（沿长边偏短）→ 强制前进
-                if from_west and fx < float(zx) - 0.18:
-                    vx = max(vx, 0.12)
-                if (not from_west) and fx > float(zx) + 0.18:
-                    vx = max(vx, 0.12)
-                self.motion.publish_cmd_vel(vx, wz)
-                time.sleep(0.05)
-            self.motion.stop_chassis()
-
-            # 3) 开环沿长边顶进，直到越过短边进入垫内
-            for k in range(6):
-                c2 = self.motion.get_base_xy_yaw_map()
-                if c2 is None:
-                    break
-                bx, by, yaw = float(c2[0]), float(c2[1]), float(c2[2])
-                fx = bx + arm_m * math.cos(yaw)
-                fy = by + arm_m * math.sin(yaw)
+                bx, by, yaw, fx, fy = pred
                 if self._drop_inside_pad(
                     fx, fy, zx, zy, from_west=from_west
                 ) and abs(fy - float(zy)) <= 0.12:
                     break
-                ex_b = math.cos(yaw) * (float(zx) - fx) + math.sin(yaw) * (
-                    float(zy) - fy
-                )
-                ey_b = -math.sin(yaw) * (float(zx) - fx) + math.cos(yaw) * (
-                    float(zy) - fy
-                )
-                # 短边侧偏大：微转后继续沿长边进
-                if abs(ey_b) > 0.08:
-                    face = math.atan2(float(zy) - by, float(zx) - bx)
-                    rem = self.motion._wrap_pi(face - yaw)
-                    if abs(rem) > 0.18:
-                        self.motion.spin_yaw_openloop(
-                            float(rem) * 0.6, max_wz=0.18, timeout=0.9
-                        )
-                        self.motion.stop_chassis()
-                need_in = not self._drop_inside_pad(
-                    fx, fy, zx, zy, from_west=from_west
-                )
-                if ex_b > 0.01 or need_in:
-                    # 贴短边外时至少顶 10cm，沿长边进区
-                    crawl = min(
-                        0.24,
-                        max(0.10 if need_in else 0.06, float(ex_b) if ex_b > 0 else 0.10),
+
+                rem = _heading_rem(bx, by, yaw)
+                ex = float(zx) - fx
+                ey = float(zy) - fy
+                ex_b = math.cos(yaw) * ex + math.sin(yaw) * ey
+                ey_b = -math.sin(yaw) * ex + math.cos(yaw) * ey
+
+                # 弧线：偏角大→多转少走；对准→快走+轻跟
+                if abs(rem) > 0.55:
+                    vx = 0.05
+                    wz = max(-0.28, min(0.28, 0.90 * rem))
+                elif abs(rem) > 0.22:
+                    vx = 0.14
+                    wz = max(-0.22, min(0.22, 0.75 * rem))
+                else:
+                    vx = max(0.08, min(0.28, 1.15 * max(ex_b, 0.06)))
+                    wz = max(
+                        -0.14,
+                        min(0.14, 0.55 * rem + 0.40 * ey_b),
                     )
-                    self._pub_status(
-                        f"PLACE_CRAWL_LONG #{k+1} +{crawl:.2f}m "
-                        f"（沿长边进区，避开短边外）"
-                    )
-                    self.motion.drive_openloop_distance(
-                        crawl, vx=0.16, timeout=1.6
+                    if from_west and fx < float(zx) - 0.16:
+                        vx = max(vx, 0.14)
+                    if (not from_west) and fx > float(zx) + 0.16:
+                        vx = max(vx, 0.14)
+
+                # 侧偏极大才原地补一把，其余允许拐弯跟上
+                if abs(ey_b) > 0.22 and abs(rem) > 0.35:
+                    self.motion.spin_yaw_openloop(
+                        float(rem) * 0.7, max_wz=0.20, timeout=1.0
                     )
                     self.motion.stop_chassis()
-                else:
-                    break
+                    continue
 
-            c3 = self.motion.get_base_xy_yaw_map()
-            if c3 is not None:
-                yaw = float(c3[2])
-                fx = float(c3[0]) + arm_m * math.cos(yaw)
-                fy = float(c3[1]) + arm_m * math.sin(yaw)
+                self.motion.publish_cmd_vel(float(vx), float(wz))
+                time.sleep(0.05)
+            self.motion.stop_chassis()
+
+            pred = _pred_drop()
+            if pred is not None:
+                _bx, _by, _yaw, fx, fy = pred
                 ok = self._drop_inside_pad(
                     fx, fy, zx, zy, from_west=from_west
                 )
@@ -2196,21 +2203,23 @@ class TaskStateMachine(Node):
                     f"预测=({fx:.2f},{fy:.2f})"
                 )
                 if not ok:
-                    # 兜底：沿长边再顶，保证越过短边
+                    rem = _heading_rem(_bx, _by, _yaw)
+                    if abs(rem) > 0.20:
+                        self.motion.spin_yaw_openloop(
+                            float(rem), max_wz=0.18, timeout=1.4
+                        )
+                        self.motion.stop_chassis()
                     if from_west:
-                        need = max(0.12, (float(zx) - 0.10) - fx)
+                        need = max(0.12, (float(zx) - 0.05) - fx)
                     else:
-                        need = max(0.12, fx - (float(zx) + 0.10))
-                    push = min(0.28, need + 0.06)
-                    self._pub_status(
-                        f"PLACE_PUSH_LONG +{push:.2f}m 越过短边进区"
-                    )
+                        need = max(0.12, fx - (float(zx) + 0.05))
+                    push = min(0.28, need + 0.04)
+                    self._pub_status(f"PLACE_PUSH +{push:.2f}m")
                     self.motion.drive_openloop_distance(
-                        push, vx=0.15, timeout=2.0
+                        push, vx=0.20, timeout=2.0
                     )
                     self.motion.stop_chassis()
 
-            # 4) 绿垫视觉微调：转身正对后再判像素中心（最后1m，马上放之前）
             if bool(self.get_parameter("place_vision_enable").value):
                 self._place_vision_center_pad(
                     zx, zy, arm_m=arm_m, from_west=from_west
@@ -2227,101 +2236,145 @@ class TaskStateMachine(Node):
         arm_m: float,
         from_west: bool,
     ) -> None:
-        """MODE_LOCAL：用前置相机绿垫质心把投放点收进垫心附近。
+        """放置视觉：先门控，大概在区前/区内就不动；只有明显偏才轻纠。
 
-        时机：Nav 到附近 + 粗转正对之后、松手之前（不在远处转弯时判，避免噪）。
-        TF 区内门禁仍作硬约束，视觉只做厘米级纠偏。
+        判断「大概到位」：
+          1) TF 投放点已在绿垫内（_drop_inside_pad）
+          2) 且画面绿垫中心不太偏（|err_u|/|err_v| 低于门阀）
+        只有不在区内，或绿垫中间地面区域偏得很多，才开视觉操控。
         """
         timeout = float(self.get_parameter("place_vision_timeout").value)
         target_cy = float(self.get_parameter("place_vision_target_cy").value)
-        self._pub_status(
-            "PLACE_VISION 看绿垫像素中心 → 对区心（转身后再判，马上放之前）"
-        )
+        gate_u = float(self.get_parameter("place_vision_gate_u").value)
+        gate_v = float(self.get_parameter("place_vision_gate_v").value)
+
+        def _pred():
+            c = self.motion.get_base_xy_yaw_map()
+            if c is None:
+                return None
+            yaw = float(c[2])
+            fx = float(c[0]) + arm_m * math.cos(yaw)
+            fy = float(c[1]) + arm_m * math.sin(yaw)
+            return fx, fy
+
+        # —— 门控：先看 TF，再瞥一眼画面 ——
+        pred = _pred()
+        in_pad0 = False
+        if pred is not None:
+            in_pad0 = self._drop_inside_pad(
+                pred[0], pred[1], zx, zy, from_west=from_west
+            )
+        bgr0 = self.motion.grab_front_bgr()
+        pad0 = detect_green_pad(bgr0) if bgr0 is not None else None
+        if pad0 is not None:
+            err_u0 = abs(float(pad0.err_u))
+            cy0 = float(pad0.cy) / float(max(pad0.image_h, 1))
+            err_v0 = abs(cy0 - target_cy)
+            frac0 = blob_area_frac(pad0)
+            # 已在区内 + 绿垫中心不太偏 → 直接放，不用视觉操控
+            if in_pad0 and err_u0 <= gate_u and err_v0 <= gate_v:
+                self._pub_status(
+                    f"PLACE_VISION_SKIP 已在区内且画面不偏 "
+                    f"u={pad0.err_u:+.2f} v={cy0-target_cy:+.2f} → 不动直接放"
+                )
+                self.motion.stop_chassis()
+                return
+            need_vision = (not in_pad0) or err_u0 > gate_u or err_v0 > gate_v
+            self._pub_status(
+                f"PLACE_VISION 门控 "
+                f"in_pad={'Y' if in_pad0 else 'N'} "
+                f"|u|={err_u0:.2f}|v|={err_v0:.2f} "
+                f"gate=({gate_u:.2f},{gate_v:.2f}) "
+                f"{'→ 轻纠' if need_vision else '→ 跳过'}"
+            )
+            if not need_vision:
+                self.motion.stop_chassis()
+                return
+        else:
+            # 看不见垫：TF 已在区内就不动；否则才纠
+            if in_pad0:
+                self._pub_status(
+                    "PLACE_VISION_SKIP 未见绿垫但 TF 已在区内 → 不动直接放"
+                )
+                self.motion.stop_chassis()
+                return
+            self._pub_status(
+                "PLACE_VISION 未见绿垫且不在区内 → 轻纠进区"
+            )
+
         t0 = time.time()
-        saw = False
-        ok_streak = 0
         while time.time() - t0 < timeout:
             bgr = self.motion.grab_front_bgr()
             if bgr is None:
                 time.sleep(0.06)
                 continue
             pad = detect_green_pad(bgr)
-            c = self.motion.get_base_xy_yaw_map()
-            if c is None:
+            pred = _pred()
+            if pred is None:
                 break
-            bx, by, yaw = float(c[0]), float(c[1]), float(c[2])
-            fx = bx + arm_m * math.cos(yaw)
-            fy = by + arm_m * math.sin(yaw)
+            fx, fy = pred
             in_pad = self._drop_inside_pad(
                 fx, fy, zx, zy, from_west=from_west
             )
 
             if pad is None:
-                # 看不见绿垫：若 TF 已在区内就停；否则沿长边微进
-                if in_pad and saw:
+                if in_pad:
+                    self._pub_status("PLACE_VISION_OK 无垫像素但已在区内 → 停")
                     break
-                if not in_pad:
-                    self.motion.publish_cmd_vel(0.10, 0.0)
-                else:
-                    self.motion.publish_cmd_vel(0.0, 0.0)
+                # 不在区：只前进，不乱转
+                self.motion.publish_cmd_vel(0.12, 0.0)
                 time.sleep(0.05)
                 continue
 
-            saw = True
-            frac = blob_area_frac(pad)
             err_u = float(pad.err_u)
             cy_frac = float(pad.cy) / float(max(pad.image_h, 1))
             err_v = cy_frac - target_cy
+            frac = blob_area_frac(pad)
 
-            if green_pad_centered(
-                pad,
-                max_err_u=0.12,
-                target_cy_frac=target_cy,
-                max_err_v=0.18,
-                min_area_frac=0.018,
-            ) and in_pad:
-                ok_streak += 1
-                if ok_streak >= 2:
-                    self._pub_status(
-                        f"PLACE_VISION_OK u={err_u:+.2f} cy={cy_frac:.2f} "
-                        f"frac={frac:.3f} in_pad=Y"
-                    )
-                    break
-            else:
-                ok_streak = 0
+            # 再次门控：进区且不偏 → 立刻停手
+            if in_pad and abs(err_u) <= gate_u and abs(err_v) <= gate_v:
+                self._pub_status(
+                    f"PLACE_VISION_OK 到位 u={err_u:+.2f} "
+                    f"v={err_v:+.2f} frac={frac:.3f} → 停"
+                )
+                break
 
-            # 横向：绿心偏右 → 右转；纵向：垫心偏下=太近/太靠里 → 略退，偏上=前进
-            wz = blob_to_yaw_cmd(pad, gain=0.55, max_wz=0.14)
-            if err_v > 0.12:
-                vx = -0.04
-            elif err_v < -0.10 or frac < 0.03:
-                vx = 0.10
-            elif not in_pad:
+            # 只在「特别偏」时动；小偏差一律不动
+            if abs(err_u) <= gate_u and abs(err_v) <= gate_v and in_pad:
+                break
+
+            # 轻纠：偏角大才转，距离差才走；禁止小偏差空拧
+            vx = 0.0
+            wz = 0.0
+            if abs(err_u) > gate_u:
+                wz = blob_to_yaw_cmd(pad, gain=0.28, max_wz=0.08)
+            if not in_pad:
                 vx = 0.12
-            else:
-                vx = 0.0
-            # 侧偏大时先拧正再前进，避免斜着蹭出短边
-            if abs(err_u) > 0.22:
-                vx = min(vx, 0.04)
+            elif err_v < -gate_v:
+                vx = 0.08  # 垫心偏上=还远，微进
+            elif err_v > gate_v:
+                vx = -0.03  # 垫心偏下=过近，微退
+            if abs(err_u) > gate_u * 1.4:
+                vx = min(vx, 0.05) if vx > 0 else vx
+
+            if abs(vx) < 1e-3 and abs(wz) < 1e-3:
+                break
             self.motion.publish_cmd_vel(float(vx), float(wz))
             time.sleep(0.05)
 
         self.motion.stop_chassis()
-        c4 = self.motion.get_base_xy_yaw_map()
-        if c4 is not None:
-            yaw = float(c4[2])
-            fx = float(c4[0]) + arm_m * math.cos(yaw)
-            fy = float(c4[1]) + arm_m * math.sin(yaw)
-            ok = self._drop_inside_pad(fx, fy, zx, zy, from_west=from_west)
+        pred = _pred()
+        if pred is not None:
+            ok = self._drop_inside_pad(
+                pred[0], pred[1], zx, zy, from_west=from_west
+            )
             self._pub_status(
                 f"PLACE_VISION_DONE in_pad={'Y' if ok else 'N'} "
-                f"pred=({fx:.2f},{fy:.2f}) 区心=({zx:.2f},{zy:.2f})"
+                f"pred=({pred[0]:.2f},{pred[1]:.2f}) 区心=({zx:.2f},{zy:.2f})"
             )
             if not ok:
-                # 视觉纠偏后仍在短边外：沿长边再顶一小段
-                push = 0.14
-                self._pub_status(f"PLACE_VISION_PUSH +{push:.2f}m 保进区")
-                self.motion.drive_openloop_distance(push, vx=0.14, timeout=1.4)
+                self._pub_status("PLACE_VISION_PUSH +0.12m 保进区")
+                self.motion.drive_openloop_distance(0.12, vx=0.14, timeout=1.2)
                 self.motion.stop_chassis()
 
     def _leave_zone_after_place(self, zx: float, zy: float) -> None:

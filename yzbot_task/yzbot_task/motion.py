@@ -297,6 +297,7 @@ class MotionHelpers:
         timeout: float = 180.0,
         *,
         early_xy_tol: Optional[float] = None,
+        early_yaw_tol: Optional[float] = None,
         soft_start: bool = False,
     ) -> bool:
         if self.drive_owner != "nav":
@@ -325,11 +326,11 @@ class MotionHelpers:
 
         goal = NavigateToPose.Goal()
         goal.pose = pose
-        early_s = (
-            f" early_xy≤{early_xy_tol:.2f}"
-            if early_xy_tol is not None
-            else ""
-        )
+        early_s = ""
+        if early_xy_tol is not None:
+            early_s += f" early_xy≤{early_xy_tol:.2f}"
+        if early_yaw_tol is not None:
+            early_s += f" early_yaw≤{early_yaw_tol:.2f}"
         self.node.get_logger().info(
             f"NAV → ({x:.2f}, {y:.2f}, yaw={yaw:.2f}){early_s}"
         )
@@ -352,7 +353,7 @@ class MotionHelpers:
             return False
         self._nav_goal_handle = goal_handle
         self.node.get_logger().info(
-            f"NAV_ACCEPTED → ({x:.2f},{y:.2f}) 等待路径/起步"
+            f"NAV_ACCEPTED → ({x:.2f},{y:.2f}) yaw={yaw:.2f} 边走边对朝向"
         )
         result_fut = goal_handle.get_result_async()
         t0 = time.time()
@@ -361,15 +362,25 @@ class MotionHelpers:
                 self.node.get_logger().error("nav result timeout")
                 self.cancel_nav()
                 return False
-            # Place / via soft-disk: XY close enough → cancel (no yaw spin / no return)
+            # 早停：仅 XY（投放/途经）或 XY+yaw（取货边走边转）
             if early_xy_tol is not None:
                 cur = self.get_base_xy_yaw_map()
                 if cur is not None:
                     dxy = math.hypot(cur[0] - float(x), cur[1] - float(y))
                     if dxy <= float(early_xy_tol):
-                        self.node.get_logger().info(
-                            f"NAV_EARLY_XY dxy={dxy:.3f}≤{early_xy_tol:.2f} → continue"
-                        )
+                        if early_yaw_tol is not None:
+                            dyaw = abs(self._wrap_pi(float(cur[2]) - float(yaw)))
+                            if dyaw > float(early_yaw_tol):
+                                # 位置到了但朝向未好：让 Nav2 继续边挪边转，不抢 cmd_vel
+                                time.sleep(0.05)
+                                continue
+                            self.node.get_logger().info(
+                                f"NAV_EARLY_XY_YAW dxy={dxy:.3f} dyaw={dyaw:.3f} → 交给夹取"
+                            )
+                        else:
+                            self.node.get_logger().info(
+                                f"NAV_EARLY_XY dxy={dxy:.3f}≤{early_xy_tol:.2f} → continue"
+                            )
                         self.cancel_nav()
                         if not soft_start:
                             self.stop_chassis()
@@ -538,9 +549,9 @@ class MotionHelpers:
             f"NAV_PLACE zone=({x:.2f},{y:.2f}) park=({gx:.2f},{gy:.2f}) "
             f"behind={so:.2f}m yaw={yaw:.2f} (区心在车前，不压区心)"
         )
-        # 软 early：区前膨胀/急停易卡死；到附近后由 PLACE_DOCK 正对+补进
+        # 软 early XY；yaw 仍要朝向区心（勿设成 3rad 无视朝向，否则 DOCK 只能边走边扭）
         soft_early = max(0.18, float(xy_tol))
-        old_yaw_tol = self._set_follow_yaw_tol(3.0)
+        old_yaw_tol = self._set_follow_yaw_tol(0.55)
         try:
             ok = self.navigate(
                 float(gx),
@@ -548,6 +559,7 @@ class MotionHelpers:
                 yaw,
                 timeout=timeout,
                 early_xy_tol=soft_early,
+                early_yaw_tol=0.45,
             )
         finally:
             if old_yaw_tol is not None:
@@ -692,6 +704,7 @@ class MotionHelpers:
         settle_sec: float = 1.5,
         reanchor: bool = True,
         stay_if_xy: Optional[float] = None,
+        early_yaw_tol: Optional[float] = None,
     ) -> bool:
         """Nav2 approach + TF pose gate (standard mobile-manipulator pattern)."""
         attempts = max(int(retries), 0) + 1
@@ -700,7 +713,12 @@ class MotionHelpers:
                 cur_hold = self.get_base_xy_yaw_map()
                 if cur_hold is not None and stay_if_xy is not None:
                     d_hold = math.hypot(cur_hold[0] - float(x), cur_hold[1] - float(y))
-                    if d_hold <= float(stay_if_xy):
+                    yaw_ok = True
+                    if early_yaw_tol is not None:
+                        yaw_ok = abs(
+                            self._wrap_pi(float(cur_hold[2]) - float(yaw))
+                        ) <= float(early_yaw_tol)
+                    if d_hold <= float(stay_if_xy) and yaw_ok:
                         self.node.get_logger().info(
                             f"NAV stay dxy={d_hold:.3f}≤{float(stay_if_xy):.2f} "
                             "→ 不再重发路径，交给夹取"
@@ -716,13 +734,14 @@ class MotionHelpers:
                     f"NAV retry {i + 1}/{attempts}: 停车清图再规划 "
                     f"→ ({x:.2f},{y:.2f})"
                 )
-            # 取货：位置到了就取消导航，不要在朝向对齐里一直停着
+            # 取货：目标带朝向，途中边走边转；XY+yaw 都够再早停（不与本地抢方向）
             if not self.navigate(
                 x,
                 y,
                 yaw,
                 timeout=timeout,
                 early_xy_tol=stay_if_xy,
+                early_yaw_tol=early_yaw_tol,
                 soft_start=True,
             ):
                 cur_hold = self.get_base_xy_yaw_map()
@@ -1105,8 +1124,13 @@ class MotionHelpers:
                     f"AIM_MAP_OK rem={rem:+.3f}rad (base_link +X → 物块)"
                 )
                 return True
-            # ROS: +wz = CCW = turn left = toward +bearing
-            wz = float(max(-max_wz, min(max_wz, yaw_gain * rem)))
+            # 近目标线性收速，避免 P×饱和拧过头再回摆
+            speed = min(
+                float(max_wz),
+                abs(float(yaw_gain) * rem),
+                max(0.05, 0.42 * abs(rem) + 0.03),
+            )
+            wz = float(math.copysign(speed, rem))
             self.node.get_logger().info(
                 f"AIM_MAP bearing={rem:+.3f} → wz={wz:+.3f} "
                 f"(+bearing=左 → +wz=左转)",

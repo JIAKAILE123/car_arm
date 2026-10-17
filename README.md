@@ -17,8 +17,10 @@ cd ~/dev_ws/yzbot
 启动后：
 1. 定位已用 Gazebo 真值（`gt_localization`），**不用**再点 2D Pose Estimate
 2. coStudio → 打开连接 → `ws://127.0.0.1:21274`
-3. 重新导入布局：`~/dev_ws/yzbot/src/costudio_yzbot.json`（已默认关掉 `/scan` 激光点）
-4. 切到 **6-Exam** 终端，按 **空格** 出题（可多次）
+3. **重新导入布局**：`~/dev_ws/yzbot/src/costudio_yzbot.json`
+4. **两种出题方式（任选其一，都走大模型解题）**：
+   - **① 空格出题**：切到「6-Exam」终端，按【空格】发下一题
+   - **② 粘贴解题**：右侧「②粘贴题目解题」贴入赛题 → 点 **提交题目→大模型解题**
 
 正式比赛隐藏总用时：`SHOW_ELAPSED=false ./run.sh`  
 不开出题终端：`RUN_EXAM=false ./run.sh`
@@ -71,6 +73,7 @@ pkill -9 -f 'ros2 launch|task_sm|llm_solver|viz_bridge|rosbridge|nav2|amcl' 2>/d
 | `/task_status` | 进度 |
 | `/viz/*` `/chat` | coStudio 面板 |
 
-默认映射：`x→红`，`y→蓝`；数量 ≥3 → A，否则 → C。
+正式赛约束：`x≥1`、`y≥1` 且 `x+y=5`。  
+默认映射：`x→红`，`y→蓝`；数量 **≥3 → A**，否则 → C（门槛是 ≥3，不是 >0 / >1）。
 
 

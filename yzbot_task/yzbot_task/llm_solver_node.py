@@ -38,10 +38,12 @@ class LlmSolverNode(Node):
         self.pub_q = self.create_publisher(String, "/exam_question_echo", 10)
 
         self.create_subscription(String, "/exam_question", self._on_question, 10)
+        # coStudio「粘贴题目解题」面板也可发到此话题（与 /exam_question 同处理）
+        self.create_subscription(String, "/panel_exam_question", self._on_question, 10)
         backend = self.get_parameter("backend").value
         self.get_logger().info(
             f"llm_solver ready backend={backend} "
-            f"(/exam_question → DeepSeek/map → /task_command)"
+            f"(/exam_question|/panel_exam_question → 大模型 → /task_command)"
         )
 
     def _mapping(self) -> dict:

@@ -58,17 +58,17 @@ private:
     }
 
     // obs1 / obs2: slide on X. obs3: slide on Y.
-    // obs1（上面）：x ∈ [-2.75, 1.15], period 23s
-    const double x1 = -0.80 + 1.95 * std::sin(2.0 * M_PI * t / 23.0);
+    // obs1（上面）：x ∈ [-2.75, 1.15], period 31s
+    const double x1 = -0.80 + 1.95 * std::sin(2.0 * M_PI * t / 31.0);
     SetPose(this->obs1_, x1, -1.35, 0.20);
 
-    // obs2（下面）：x ∈ [-2.30, 1.00], period 25.67s（负向再伸 1m）
-    const double x2 = -0.65 + 1.65 * std::sin(2.0 * M_PI * t / 25.67 + 1.2);
+    // obs2（下面）：x ∈ [-2.30, 1.00], period 33.67s（负向再伸 1m）
+    const double x2 = -0.65 + 1.65 * std::sin(2.0 * M_PI * t / 33.67 + 1.2);
     SetPose(this->obs2_, x2, -6.15, 0.20);
 
-    // obs3: fixed x=-2, y ∈ [-2.5, 2.5], period 40s
+    // obs3: fixed x=-2, y ∈ [-2.5, 2.5], period 45s
     if (this->obs3_) {
-      const double y3 = 0.0 + 2.5 * std::sin(2.0 * M_PI * t / 40.0 + 2.4);
+      const double y3 = 0.0 + 2.5 * std::sin(2.0 * M_PI * t / 45.0 + 2.4);
       SetPose(this->obs3_, -2.0, y3, 0.20);
     }
   }

@@ -78,7 +78,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_sim_time': use_sim_time,
-                'horizon_sec': 2.6,
+                'horizon_sec': 2.2,
                 'dt_sec': 0.20,
                 'rate_hz': 10.0,
             }],
