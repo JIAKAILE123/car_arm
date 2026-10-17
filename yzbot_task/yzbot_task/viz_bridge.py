@@ -393,9 +393,14 @@ class VizBridge(Node):
                 "PLACE_ARM",
                 "PLACE_VISION",
                 "PLACE_LIFT",
+                "PLACE_RETRY",
+                "HOLDING",
+                "HOLDING_BLOCK",
+                "DETACH_STUCK",
                 "LEAVE_ZONE",
                 "DETACH →",
                 "DETACH_OK",
+                "DETACH_FAIL",
                 "DETACH_SOFT",
             )
         ):

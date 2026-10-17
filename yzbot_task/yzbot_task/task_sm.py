@@ -167,6 +167,8 @@ class TaskStateMachine(Node):
         self.cube_next = {"red": 1, "blue": 1}
         # Same letter zone: side-by-side slots so later cubes don't crush earlier ones
         self._zone_place_count = {"A": 0, "B": 0, "C": 0}
+        # Attached cube not yet dropped — must place before next pick
+        self._holding: Optional[Tuple[str, int, str]] = None
         self.create_timer(2.0, self._maybe_rebind_image, callback_group=self.cb_group)
         self._image_rebound = False
 
@@ -1342,43 +1344,87 @@ class TaskStateMachine(Node):
         time.sleep(0.02)
         return True
 
+    def _cube_still_on_ee(self, color: str, cid: int) -> bool:
+        """True if cube TF is still glued near EE (attach not really cleared)."""
+        from yzbot_task.vision_pose import (
+            ee_to_pose_distance_m,
+            known_cube_pose_arm_raw,
+        )
+
+        stamp = self.get_clock().now().to_msg()
+        km = known_cube_pose_arm_raw(
+            self.motion.tf_buffer, color, cid, stamp
+        )
+        if not km.ok or km.estimate is None:
+            return False
+        dist = ee_to_pose_distance_m(
+            self.motion.tf_buffer, km.estimate.pose_arm
+        )
+        if dist is None:
+            return False
+        # After real detach the block falls away; <12cm means still stuck
+        return float(dist) < 0.12
+
     def _place_with_moveit(self, color: str, cid: int) -> bool:
-        """放置：快速下探 → 立刻松开 → 马上抬臂（不等待）。"""
+        """放置：下探 → 松开确认 → 抬臂。未松开成功则失败，禁止去下一块。"""
         import subprocess
         import os
 
-        self._pub_status("PLACE_ARM 快速下放")
+        self._pub_status("PLACE_ARM 下放投放")
         if not self.motion.arm_place_pose():
             self.get_logger().warn("place pose failed; still try detach")
+        time.sleep(0.12)
 
-        # 先走 ROS detach（快），cube_control 短超时，绝不干等
-        self._pub_status(f"DETACH → {color}_{cid}（立刻抬臂）")
-        ok = bool(self.motion.detach(color, cid))
-        script = os.path.join(
-            os.path.expanduser("~/dev_ws/yzbot/src"), "cube_control.sh"
-        )
-        if os.path.isfile(script):
-            try:
-                r = subprocess.run(
-                    ["bash", script, "off", color, str(cid)],
-                    check=False,
-                    timeout=0.8,
-                    capture_output=True,
-                    text=True,
-                )
-                if r.returncode == 0:
-                    ok = True
-                if r.stdout:
-                    self.get_logger().info(r.stdout)
-            except Exception as exc:  # noqa: BLE001
-                self.get_logger().warn(f"cube_control off skipped: {exc}")
-        if ok:
-            self._pub_status(f"DETACH_OK {color}_{cid}")
-        else:
-            self._pub_status(f"DETACH_SOFT_FAIL {color}_{cid} → 仍马上抬臂")
+        ok = False
+        for attempt in range(1, 4):
+            self._pub_status(
+                f"DETACH → {color}_{cid} (尝试 {attempt}/3)"
+            )
+            # LinkAttacher must succeed; cube_control alone must not clear gate
+            ok = bool(self.motion.detach(color, cid))
+            script = os.path.join(
+                os.path.expanduser("~/dev_ws/yzbot/src"), "cube_control.sh"
+            )
+            if os.path.isfile(script):
+                try:
+                    r = subprocess.run(
+                        ["bash", script, "off", color, str(cid)],
+                        check=False,
+                        timeout=1.0,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if r.stdout:
+                        self.get_logger().info(r.stdout)
+                    if not ok and r.returncode == 0:
+                        # script claimed off — accept only if EE no longer glued
+                        time.sleep(0.08)
+                        ok = not self._cube_still_on_ee(color, cid)
+                except Exception as exc:  # noqa: BLE001
+                    self.get_logger().warn(f"cube_control off skipped: {exc}")
+            if ok:
+                time.sleep(0.08)
+                if self._cube_still_on_ee(color, cid):
+                    self._pub_status(
+                        f"DETACH_STUCK {color}_{cid} 块仍贴EE → 再松"
+                    )
+                    ok = False
+                    try:
+                        self.motion.detach(color, cid)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    continue
+                break
+            time.sleep(0.15)
 
-        # 放下后立刻抬起，不 sleep
-        self._pub_status("PLACE_LIFT 马上抬起")
+        if not ok:
+            self._pub_status(
+                f"DETACH_FAIL {color}_{cid} — 仍持物，不进入下一块"
+            )
+            return False
+
+        self._pub_status(f"DETACH_OK {color}_{cid}")
+        self._pub_status("PLACE_LIFT 抬起到初始姿态")
         self.motion.arm_lift_after_place()
         return True
 
@@ -1448,6 +1494,12 @@ class TaskStateMachine(Node):
             return
 
         self._zone_place_count = {"A": 0, "B": 0, "C": 0}
+        # 不在此清空 _holding：若上次异常中断仍吸着块，首轮会 HOLDING_BLOCK 先强制放
+        if self._holding is not None:
+            hc, hid, hz = self._holding
+            self._pub_status(
+                f"RESUME_HOLDING {hc}_{hid} → {hz}（上次未放下，先补放）"
+            )
         try:
             self.motion.clear_placed_keepouts()
             self.motion.set_keepout_except(None, clear_maps=False)
@@ -1499,6 +1551,47 @@ class TaskStateMachine(Node):
         )
 
         for idx, (color, cid, zone) in enumerate(queue, start=1):
+            # 硬门：手里还有块时绝不开始下一块的取货导航
+            if self._holding is not None:
+                hc, hid, hz = self._holding
+                self._pub_status(
+                    f"HOLDING_BLOCK 仍持 {hc}_{hid} → 禁止 STEP "
+                    f"{color}_{cid}，先强制放到 {hz}"
+                )
+                zx_h, zy_h, zyaw_h = self._pose(f"zone_{hz.lower()}")
+                tx_h, ty_h, slot_h = self._place_slot_xy(zx_h, zy_h, hz)
+                tx_h, ty_h, _ = self._place_drop_inward(
+                    tx_h, ty_h, zx_h, zy_h, zone=hz
+                )
+                arm_m = float(self.get_parameter("place_front_m").value)
+                park_m = arm_m + float(
+                    self.get_parameter("place_park_extra_m").value
+                )
+                if not skip_nav:
+                    self.motion.set_keepout_except(hz, clear_maps=False)
+                    self.motion.navigate_place_zone(
+                        tx_h, ty_h, xy_tol=0.28, approach_standoff=park_m
+                    )
+                    self._dock_place_front(
+                        tx_h, ty_h, front_m=arm_m, park_m=park_m
+                    )
+                if not self._place_with_moveit(hc, hid):
+                    self.motion.set_keepout_except(None)
+                    self._pub_status(
+                        f"PLACE_ABORT {hc}_{hid} 未放下 — 中止，不去下一块"
+                    )
+                    return
+                self._holding = None
+                self._zone_place_count[str(hz).upper()] = int(
+                    self._zone_place_count.get(str(hz).upper(), 0)
+                ) + 1
+                self._pub_status(
+                    f"PLACED {hc}_{hid} at {hz} slot#{slot_h}（门控补放）"
+                )
+                self.motion.add_placed_keepout(tx_h, ty_h, radius=0.14)
+                self.motion.set_keepout_except(None, clear_maps=False)
+                self._leave_zone_after_place(tx_h, ty_h)
+
             self._pub_status(f"STEP {idx}/{len(queue)}: {color}_{cid} -> {zone}")
             zx, zy, zyaw = self._pose(f"zone_{zone.lower()}")
 
@@ -1830,6 +1923,12 @@ class TaskStateMachine(Node):
                 )
                 continue
 
+            # 已夹起：标记持物，必须放置成功后才能去下一块
+            self._holding = (str(color), int(cid), str(zone).upper())
+            self._pub_status(
+                f"HOLDING {color}_{cid} → 先运放到 {zone}，禁止下一块"
+            )
+
             # 投放：槽位 + 略内收，夹在绿垫长方形内（不收成一个点）
             tx, ty, slot_i = self._place_slot_xy(zx, zy, zone)
             tx, ty, _approach_yaw = self._place_drop_inward(
@@ -1874,9 +1973,31 @@ class TaskStateMachine(Node):
                     )
                 self._dock_place_front(tx, ty, front_m=arm_m, park_m=park_m)
 
-            if not self._place_with_moveit(color, cid):
+            arm_m = float(self.get_parameter("place_front_m").value)
+            park_m = arm_m + float(
+                self.get_parameter("place_park_extra_m").value
+            )
+            placed = self._place_with_moveit(color, cid)
+            if not placed:
+                # One more full place attempt before aborting the queue
+                self._pub_status(
+                    f"PLACE_RETRY {color}_{cid} → {zone}（仍持物）"
+                )
+                if not skip_nav:
+                    self.motion.set_keepout_except(zone, clear_maps=False)
+                    self.motion.navigate_place_zone(
+                        tx, ty, xy_tol=0.28, approach_standoff=park_m
+                    )
+                    self._dock_place_front(tx, ty, front_m=arm_m, park_m=park_m)
+                placed = self._place_with_moveit(color, cid)
+            if not placed:
                 self.motion.set_keepout_except(None)
+                self._pub_status(
+                    f"PLACE_ABORT {color}_{cid} 未放下 — 中止，不去下一块"
+                )
                 return
+
+            self._holding = None
             zkey = str(zone).strip().upper()
             self._zone_place_count[zkey] = int(self._zone_place_count.get(zkey, 0)) + 1
             self._pub_status(f"PLACED {color}_{cid} at {zone} slot#{slot_i}")

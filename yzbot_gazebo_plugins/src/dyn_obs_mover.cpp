@@ -50,18 +50,27 @@ private:
     if (!this->obs2_) {
       this->obs2_ = this->world_->ModelByName("dyn_obs_2");
     }
+    if (!this->obs3_) {
+      this->obs3_ = this->world_->ModelByName("dyn_obs_3");
+    }
     if (!this->obs1_ || !this->obs2_) {
       return;
     }
 
-    // Both horizontal bars slide on X. Period 10.67s (1.5x of 16s).
-    // obs1（上面）：x ∈ [-0.75, 1.15]
-    const double x1 = 0.20 + 0.95 * std::sin(2.0 * M_PI * t / 10.67);
+    // obs1 / obs2: slide on X. obs3: slide on Y.
+    // obs1（上面）：x ∈ [-2.75, 1.15], period 23s
+    const double x1 = -0.80 + 1.95 * std::sin(2.0 * M_PI * t / 23.0);
     SetPose(this->obs1_, x1, -1.35, 0.20);
 
-    // obs2（下面）：x ∈ [-1.30, 1.00]
-    const double x2 = -0.15 + 1.15 * std::sin(2.0 * M_PI * t / 10.67 + 1.2);
+    // obs2（下面）：x ∈ [-2.30, 1.00], period 25.67s（负向再伸 1m）
+    const double x2 = -0.65 + 1.65 * std::sin(2.0 * M_PI * t / 25.67 + 1.2);
     SetPose(this->obs2_, x2, -6.15, 0.20);
+
+    // obs3: fixed x=-2, y ∈ [-2.5, 2.5], period 40s
+    if (this->obs3_) {
+      const double y3 = 0.0 + 2.5 * std::sin(2.0 * M_PI * t / 40.0 + 2.4);
+      SetPose(this->obs3_, -2.0, y3, 0.20);
+    }
   }
 
   static void SetPose(
@@ -76,6 +85,7 @@ private:
   gazebo::physics::WorldPtr world_;
   gazebo::physics::ModelPtr obs1_;
   gazebo::physics::ModelPtr obs2_;
+  gazebo::physics::ModelPtr obs3_;
   gazebo::event::ConnectionPtr update_connection_;
   double last_t_{-1.0};
 };

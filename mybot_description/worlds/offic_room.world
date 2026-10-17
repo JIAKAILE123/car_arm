@@ -4089,7 +4089,7 @@
 
     <!-- Dyn movers: horizontal bars (long on X), both slide along X -->
     <model name='dyn_obs_1'>
-      <pose>0.20 -1.35 0.20 0 0 0</pose>
+      <pose>-0.80 -1.35 0.20 0 0 0</pose>
       <static>0</static>
       <link name='link'>
         <inertial>
@@ -4100,11 +4100,11 @@
           </inertia>
         </inertial>
         <collision name='collision'>
-          <geometry><box><size>0.55 0.28 0.40</size></box></geometry>
+          <geometry><box><size>0.385 0.28 0.40</size></box></geometry>
           <laser_retro>200</laser_retro>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>0.55 0.28 0.40</size></box></geometry>
+          <geometry><box><size>0.385 0.28 0.40</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
@@ -4131,11 +4131,43 @@
           </inertia>
         </inertial>
         <collision name='collision'>
-          <geometry><box><size>0.55 0.28 0.40</size></box></geometry>
+          <geometry><box><size>0.385 0.28 0.40</size></box></geometry>
           <laser_retro>200</laser_retro>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>0.55 0.28 0.40</size></box></geometry>
+          <geometry><box><size>0.385 0.28 0.40</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Purple</name>
+            </script>
+            <ambient>0.55 0.15 0.75 1</ambient>
+            <diffuse>0.65 0.20 0.90 1</diffuse>
+          </material>
+        </visual>
+        <self_collide>0</self_collide>
+        <gravity>0</gravity>
+        <kinematic>1</kinematic>
+      </link>
+    </model>
+    <!-- Dyn mover 3: slides along Y at x≈-2, y∈[-2.5, 2.5]; longest edge 0.55*0.7 -->
+    <model name='dyn_obs_3'>
+      <pose>-2.00 0.00 0.20 0 0 0</pose>
+      <static>0</static>
+      <link name='link'>
+        <inertial>
+          <mass>1</mass>
+          <inertia>
+            <ixx>0.08</ixx><iyy>0.12</iyy><izz>0.12</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz>
+          </inertia>
+        </inertial>
+        <collision name='collision'>
+          <geometry><box><size>0.385 0.28 0.40</size></box></geometry>
+          <laser_retro>200</laser_retro>
+        </collision>
+        <visual name='visual'>
+          <geometry><box><size>0.385 0.28 0.40</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>

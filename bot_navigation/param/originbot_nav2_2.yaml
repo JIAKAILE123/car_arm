@@ -97,7 +97,7 @@ controller_server:
       plugin: "dwb_core::DWBLocalPlanner"
       debug_trajectory_details: False
       # 允许小幅倒车，否则卡住时只能靠 BackUp 恢复 → 慢倒且不转弯
-      min_vel_x: -0.35
+      min_vel_x: -1.0
       min_vel_y: 0.0
       max_vel_x: 2.0
       max_vel_y: 0.0
@@ -371,7 +371,7 @@ velocity_smoother:
     scale_velocities: False
     feedback: "OPEN_LOOP"
     max_velocity: [2.0, 0.0, 1.0]
-    min_velocity: [-0.55, 0.0, -1.0]
+    min_velocity: [-1.0, 0.0, -1.0]
     max_accel: [1.40, 0.0, 0.90]
     max_decel: [-1.60, 0.0, -0.90]
     odom_topic: "odometry/filtered"

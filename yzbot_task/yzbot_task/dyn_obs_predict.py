@@ -18,11 +18,13 @@ from std_msgs.msg import Header
 
 
 # Must match yzbot_gazebo_plugins/src/dyn_obs_mover.cpp
-_PERIOD = 10.67
+# axis 'x': x = mid + amp*sin, y fixed
+# axis 'y': y = mid + amp*sin, x fixed
+# tuple: (axis, fixed, mid, amp, phase, period, half_x, half_y)
 _OBS = (
-    # (x0, amp, phase, y, half_x, half_y) — 必须与 dyn_obs_mover.cpp 一致
-    (0.20, 0.95, 0.0, -1.35, 0.36, 0.26),
-    (-0.15, 1.15, 1.2, -6.15, 0.36, 0.26),
+    ("x", -1.35, -0.80, 1.95, 0.0, 23.0, 0.252, 0.26),
+    ("x", -6.15, -0.65, 1.65, 1.2, 25.67, 0.252, 0.26),
+    ("y", -2.00, 0.00, 2.50, 2.4, 40.0, 0.252, 0.26),
 )
 
 
@@ -39,7 +41,8 @@ class DynObsPredict(Node):
         self.create_timer(1.0 / hz, self._tick)
         self.get_logger().info(
             f"dyn_obs_predict → /yzbot/dyn_obs_predict "
-            f"horizon={float(self.get_parameter('horizon_sec').value):.1f}s"
+            f"horizon={float(self.get_parameter('horizon_sec').value):.1f}s "
+            f"n_obs={len(_OBS)}"
         )
 
     def _sim_t(self) -> float:
@@ -65,10 +68,16 @@ class DynObsPredict(Node):
         step = max(0.06, float(self.get_parameter("step_m").value))
         pts: List[Tuple[float, float, float]] = []
         n = int(horizon / dt) + 1
-        for x0, amp, phase, y, hx, hy in _OBS:
+        for axis, fixed, mid, amp, phase, period, hx, hy in _OBS:
             for i in range(n):
                 t = t0 + i * dt
-                x = x0 + amp * math.sin(2.0 * math.pi * t / _PERIOD + phase)
+                s = mid + amp * math.sin(
+                    2.0 * math.pi * t / float(period) + phase
+                )
+                if axis == "y":
+                    x, y = float(fixed), float(s)
+                else:
+                    x, y = float(s), float(fixed)
                 pts.extend(self._footprint(x, y, hx, hy, step))
         header = Header()
         header.stamp = self.get_clock().now().to_msg()
