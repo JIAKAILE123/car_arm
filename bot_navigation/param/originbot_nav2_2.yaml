@@ -83,8 +83,8 @@ controller_server:
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
-      required_movement_radius: 0.22
-      movement_time_allowance: 12.0
+      required_movement_radius: 0.20
+      movement_time_allowance: 14.0
 
     general_goal_checker:
       stateful: True
@@ -97,29 +97,29 @@ controller_server:
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
       debug_trajectory_details: False
-      # 允许小幅倒车，否则卡住时只能靠 BackUp 恢复 → 慢倒且不转弯
-      min_vel_x: -3.0
+      # 倒车限幅：过大容易在墙边倒着撞
+      min_vel_x: -0.55
       min_vel_y: 0.0
       max_vel_x: 3.0
       max_vel_y: 0.0
-      # 线速度保持；角速度压低 → 到点少拧圈
-      max_vel_theta: 0.55
+      # 墙边/杆端转弯需要够用的角速度，过低会原地卡死
+      max_vel_theta: 0.90
       min_speed_xy: 0.0
       max_speed_xy: 3.0
       min_speed_theta: 0.0
       acc_lim_x: 2.4
       acc_lim_y: 0.0
-      acc_lim_theta: 0.50
+      acc_lim_theta: 1.20
       decel_lim_x: -2.4
       decel_lim_y: 0.0
-      decel_lim_theta: -0.50
+      decel_lim_theta: -1.20
       vx_samples: 20
       vy_samples: 1
-      vtheta_samples: 20
+      vtheta_samples: 28
       # 高速前瞻加长：少短视拧弯，贴轨靠弱化 PathAlign/PathDist
-      sim_time: 1.4
+      sim_time: 1.6
       sim_granularity: 0.05
-      angular_sim_granularity: 0.08
+      angular_sim_granularity: 0.06
       xy_goal_tolerance: 0.34
       yaw_goal_tolerance: 0.80
       transform_tolerance: 0.3
@@ -128,21 +128,21 @@ controller_server:
       critics: ["RotateToGoal", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
       RotateToGoal:
         enabled: true
-        scale: 0.7
-        slowing_factor: 8.0
+        scale: 1.0
+        slowing_factor: 5.0
       BaseObstacle:
         enabled: true
-        # 略加强对预测杆；勿过高，否则物块旁空转找不到
-        scale: 36.0
+        # 必须够硬，否则会穿膨胀直接撞墙；略低于旧 20，减轻假墙卡死
+        scale: 18.0
       GoalAlign:
         enabled: true
         scale: 2.2
       PathAlign:
         enabled: true
-        scale: 8.0
+        scale: 5.5
       PathDist:
         enabled: true
-        scale: 12.0
+        scale: 10.0
       GoalDist:
         enabled: true
         scale: 24.0
@@ -165,8 +165,9 @@ local_costmap:
       plugins: ["obstacle_layer", "denoise_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 2.5
-        inflation_radius: 0.55
+        # 恢复安全膨胀：防撞优先；卡死靠 recovery 倒车，不靠削薄墙
+        cost_scaling_factor: 4.0
+        inflation_radius: 0.38
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -210,7 +211,7 @@ local_costmap:
           obstacle_min_range: 0.0
           raytrace_max_range: 0.0
           raytrace_min_range: 0.0
-          observation_persistence: 0.40
+          observation_persistence: 0.22
       denoise_layer:
         plugin: "nav2_costmap_2d::DenoiseLayer"
         enabled: True
@@ -273,8 +274,8 @@ global_costmap:
         group_connectivity_type: 8
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 2.8
-        inflation_radius: 0.55
+        cost_scaling_factor: 4.0
+        inflation_radius: 0.38
       always_send_full_costmap: False
 
 map_server:
@@ -339,9 +340,9 @@ behavior_server:
     robot_base_frame: base_footprint
     transform_tolerance: 0.2
     simulate_ahead_time: 1.5
-    max_rotational_vel: 0.70
+    max_rotational_vel: 0.90
     min_rotational_vel: 0.10
-    rotational_acc_lim: 1.0
+    rotational_acc_lim: 1.2
 
 waypoint_follower:
   ros__parameters:
@@ -363,7 +364,7 @@ velocity_smoother:
     scale_velocities: False
     feedback: "OPEN_LOOP"
     max_velocity: [3.0, 0.0, 0.55]
-    min_velocity: [-3.0, 0.0, -0.55]
+    min_velocity: [-0.55, 0.0, -0.90]
     max_accel: [2.2, 0.0, 0.50]
     max_decel: [-2.2, 0.0, -0.50]
     odom_topic: "odometry/filtered"
@@ -387,7 +388,8 @@ collision_monitor:
     polygons: ["PolygonStop", "PolygonCrawl"]
     PolygonStop:
       type: "circle"
-      radius: 0.40
+      # 略加大急停圈，激光看见墙就先刹，少顶死
+      radius: 0.48
       action_type: "stop"
       min_points: 3
       visualize: False
@@ -396,10 +398,10 @@ collision_monitor:
     PolygonCrawl:
       type: "circle"
       # 只在真正靠近时慢行，避免远处物块旁爬行
-      radius: 0.46
+      radius: 0.58
       action_type: "slowdown"
       min_points: 4
-      slowdown_ratio: 0.65
+      slowdown_ratio: 0.45
       visualize: False
       polygon_pub_topic: "polygon_crawl"
       enabled: True

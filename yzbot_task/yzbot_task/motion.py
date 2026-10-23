@@ -529,6 +529,7 @@ class MotionHelpers:
         xy_tol: float = 0.45,
         timeout: float = 120.0,
         approach_standoff: float = 0.38,
+        from_east: bool = False,
     ) -> bool:
         """Nav to a point ~PLACE_FRONT_M behind drop (arm EE ≈ 0.38m ahead).
 
@@ -538,20 +539,24 @@ class MotionHelpers:
         rx = float(cur[0]) if cur is not None else float(x) - 1.0
         # Prefer ±X dock (same as PLACE_DOCK): base behind center, face toward it
         so = max(0.15, float(approach_standoff))
-        cands = [
-            (float(x) - so, float(y), 0.0),     # west of zone, face +X
-            (float(x) + so, float(y), math.pi),  # east of zone, face -X
-        ]
-        gx, gy, yaw = min(
-            cands, key=lambda p: (p[0] - rx) ** 2 + (p[1] - float(y)) ** 2
-        )
+        if from_east:
+            # 停在区的 x 正侧，车头朝西对区心，不再绕到西侧转身
+            gx, gy, yaw = float(x) + so, float(y), math.pi
+        else:
+            cands = [
+                (float(x) - so, float(y), 0.0),     # west of zone, face +X
+                (float(x) + so, float(y), math.pi),  # east of zone, face -X
+            ]
+            gx, gy, yaw = min(
+                cands, key=lambda p: (p[0] - rx) ** 2 + (p[1] - float(y)) ** 2
+            )
         self.node.get_logger().info(
             f"NAV_PLACE zone=({x:.2f},{y:.2f}) park=({gx:.2f},{gy:.2f}) "
             f"behind={so:.2f}m yaw={yaw:.2f} (区心在车前，不压区心)"
         )
-        # 软 early XY；yaw 仍要朝向区心（勿设成 3rad 无视朝向，否则 DOCK 只能边走边扭）
-        soft_early = max(0.18, float(xy_tol))
-        old_yaw_tol = self._set_follow_yaw_tol(0.55)
+        # 位置到了就停，不在区前把朝向拧死（容易转过）
+        soft_early = max(0.22, float(xy_tol))
+        old_yaw_tol = self._set_follow_yaw_tol(0.90)
         try:
             ok = self.navigate(
                 float(gx),
@@ -559,7 +564,7 @@ class MotionHelpers:
                 yaw,
                 timeout=timeout,
                 early_xy_tol=soft_early,
-                early_yaw_tol=0.45,
+                early_yaw_tol=0.90,
             )
         finally:
             if old_yaw_tol is not None:
@@ -601,8 +606,12 @@ class MotionHelpers:
         self.reanchor_amcl(pin_x, pin_y, use_yaw, settle_sec=0.03)
         return True
 
-    def _set_follow_yaw_tol(self, value: float) -> Optional[float]:
-        """Set FollowPath.yaw_goal_tolerance; return previous value if known."""
+    def _set_follow_yaw_tol(
+        self,
+        value: float,
+        name: str = "FollowPath.yaw_goal_tolerance",
+    ) -> Optional[float]:
+        """Set a controller yaw tolerance; return previous value if known."""
         from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
         from rcl_interfaces.srv import SetParameters, GetParameters
 
@@ -616,7 +625,7 @@ class MotionHelpers:
             prev = None
             if get_cli.wait_for_service(timeout_sec=0.4):
                 greq = GetParameters.Request()
-                greq.names = ["FollowPath.yaw_goal_tolerance"]
+                greq.names = [name]
                 gfut = get_cli.call_async(greq)
                 if self._spin_until(gfut, 1.0) and gfut.result() is not None:
                     vals = gfut.result().values
@@ -626,7 +635,7 @@ class MotionHelpers:
                 return prev
             preq = SetParameters.Request()
             p = Parameter()
-            p.name = "FollowPath.yaw_goal_tolerance"
+            p.name = name
             p.value = ParameterValue()
             p.value.type = ParameterType.PARAMETER_DOUBLE
             p.value.double_value = float(value)
@@ -634,13 +643,133 @@ class MotionHelpers:
             sfut = set_cli.call_async(preq)
             self._spin_until(sfut, 1.0)
             self.node.get_logger().info(
-                f"FollowPath.yaw_goal_tolerance → {value:.2f}"
+                f"{name} → {value:.2f}"
                 + (f" (was {prev:.2f})" if prev is not None else "")
             )
             return prev if prev is not None else 0.5
         except Exception as exc:  # noqa: BLE001
             self.node.get_logger().warn(f"yaw_tol set skipped: {exc}")
             return None
+
+    def _param_cli(self, node_name: str):
+        from rcl_interfaces.srv import SetParameters
+
+        cache = getattr(self, "_param_clis", None)
+        if cache is None:
+            self._param_clis = {}
+            cache = self._param_clis
+        cli = cache.get(node_name)
+        if cli is None:
+            cli = self.node.create_client(
+                SetParameters, f"{node_name}/set_parameters"
+            )
+            cache[node_name] = cli
+        return cli
+
+    def _set_remote_params(
+        self,
+        node_name: str,
+        *,
+        doubles: Optional[dict] = None,
+        strings: Optional[dict] = None,
+    ) -> bool:
+        from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+        from rcl_interfaces.srv import SetParameters
+
+        cli = self._param_cli(node_name)
+        if not cli.service_is_ready() and not cli.wait_for_service(timeout_sec=0.35):
+            self.node.get_logger().warn(f"param service missing: {node_name}")
+            return False
+        req = SetParameters.Request()
+        params = []
+        for name, val in (doubles or {}).items():
+            p = Parameter()
+            p.name = str(name)
+            p.value = ParameterValue()
+            p.value.type = ParameterType.PARAMETER_DOUBLE
+            p.value.double_value = float(val)
+            params.append(p)
+        for name, val in (strings or {}).items():
+            p = Parameter()
+            p.name = str(name)
+            p.value = ParameterValue()
+            p.value.type = ParameterType.PARAMETER_STRING
+            p.value.string_value = str(val)
+            params.append(p)
+        req.parameters = params
+        fut = cli.call_async(req)
+        if not self._spin_until(fut, 1.2) or fut.result() is None:
+            self.node.get_logger().warn(f"param set timeout: {node_name}")
+            return False
+        return True
+
+    def _costmap_param_nodes(self) -> Tuple[str, str]:
+        """Humble costmap node is /local_costmap/local_costmap; fall back if needed."""
+        cached = getattr(self, "_costmap_nodes", None)
+        if cached:
+            return cached
+        pairs = (
+            ("/local_costmap/local_costmap", "/global_costmap/global_costmap"),
+            ("/local_costmap", "/global_costmap"),
+        )
+        for local_n, global_n in pairs:
+            cli = self._param_cli(local_n)
+            if cli.service_is_ready() or cli.wait_for_service(timeout_sec=0.25):
+                self._costmap_nodes = (local_n, global_n)
+                return self._costmap_nodes
+        self._costmap_nodes = pairs[0]
+        return self._costmap_nodes
+
+    def set_c_mouth_ease(self, on: bool) -> None:
+        """Shrink inflation and the stop circle only while crossing the C mouth.
+
+        Rest of the map stays at the normal radii. Call with False to restore.
+        """
+        if bool(getattr(self, "_mouth_ease", False)) == bool(on):
+            return
+        self._mouth_ease = bool(on)
+        if on:
+            infl, scale = 0.30, 8.0
+            pad_l, pad_g = 0.0, 0.0
+            footprint = (
+                "[[0.32, 0.33], [0.32, -0.33], [-0.30, -0.33], [-0.30, 0.33]]"
+            )
+            stop_r, crawl_r = 0.38, 0.48
+        else:
+            infl, scale = 0.38, 4.0
+            pad_l, pad_g = 0.03, 0.02
+            footprint = (
+                "[[0.38, 0.40], [0.38, -0.40], [-0.36, -0.40], [-0.36, 0.40]]"
+            )
+            stop_r, crawl_r = 0.48, 0.58
+        local_n, global_n = self._costmap_param_nodes()
+        doubles = {
+            "inflation_layer.inflation_radius": infl,
+            "inflation_layer.cost_scaling_factor": scale,
+        }
+        self._set_remote_params(
+            local_n,
+            doubles={**doubles, "footprint_padding": pad_l},
+            strings={"footprint": footprint},
+        )
+        self._set_remote_params(
+            global_n,
+            doubles={**doubles, "footprint_padding": pad_g},
+            strings={"footprint": footprint},
+        )
+        self._set_remote_params(
+            "/collision_monitor",
+            doubles={
+                "PolygonStop.radius": stop_r,
+                "PolygonCrawl.radius": crawl_r,
+            },
+        )
+        self.clear_costmaps(timeout=0.4)
+        self.node.get_logger().info(
+            "C_MOUTH ease ON 膨胀0.30 急停0.38"
+            if on
+            else "C_MOUTH ease OFF 膨胀/急停已恢复"
+        )
 
     def get_base_xy_yaw_map(self) -> Optional[Tuple[float, float, float]]:
         """Return (x, y, yaw) of base in map (prefer base_link, else base_footprint)."""
@@ -705,6 +834,7 @@ class MotionHelpers:
         reanchor: bool = True,
         stay_if_xy: Optional[float] = None,
         early_yaw_tol: Optional[float] = None,
+        snap_yaw: bool = False,
     ) -> bool:
         """Nav2 approach + TF pose gate (standard mobile-manipulator pattern)."""
         attempts = max(int(retries), 0) + 1
@@ -749,9 +879,11 @@ class MotionHelpers:
                     d_hold = math.hypot(cur_hold[0] - float(x), cur_hold[1] - float(y))
                     if d_hold <= float(stay_if_xy):
                         self.node.get_logger().info(
-                            f"NAV stay after fail dxy={d_hold:.3f} → 交给夹取"
+                            f"NAV stay after fail dxy={d_hold:.3f} → 先转到目标朝向"
                         )
                         self.stop_chassis()
+                        if snap_yaw:
+                            self.snap_yaw_map(yaw, tol=yaw_tol)
                         return True
                 self.node.get_logger().error(f"NAV attempt {i + 1}/{attempts} failed")
                 continue
@@ -764,10 +896,14 @@ class MotionHelpers:
                 if cur_hold is not None:
                     d_hold = math.hypot(cur_hold[0] - float(x), cur_hold[1] - float(y))
                     if d_hold <= float(stay_if_xy):
+                        dyaw = abs(self._wrap_pi(float(cur_hold[2]) - float(yaw)))
                         self.node.get_logger().info(
-                            f"NAV xy ok dxy={d_hold:.3f} yaw交给视觉 → 停在取货点"
+                            f"NAV xy ok dxy={d_hold:.3f} dyaw={dyaw:.3f} "
+                            f"→ 原地转到目标朝向再交视觉"
                         )
                         self.stop_chassis()
+                        if snap_yaw and dyaw > float(yaw_tol):
+                            self.snap_yaw_map(yaw, tol=yaw_tol)
                         return True
             if ok:
                 if reanchor:
@@ -831,13 +967,14 @@ class MotionHelpers:
         self,
         zones: dict,
         *,
-        half_x: float = 0.48,
-        half_y: float = 0.28,
+        half_x: float = 0.20,
+        half_y: float = 0.10,
         step: float = 0.06,
     ) -> None:
         """Register place-zone rectangles (map frame) as virtual obstacles.
 
-        Sized to cover letter pad + margin so chassis cannot climb cubes.
+        Lethal core is the letter only. Pad edges stay in the inflation
+        gradient so the chassis can graze or briefly roll onto them.
         """
         self._zone_keepout = {}
         for letter, xy in zones.items():
@@ -857,6 +994,14 @@ class MotionHelpers:
         self.node.get_logger().info(
             f"ZONE_KEEPOUT A/B/C half=({half_x:.2f},{half_y:.2f}) "
             f"keys={list(self._zone_keepout.keys())}"
+        )
+        self._publish_zone_keepout()
+
+    def add_named_keepout(self, key: str, pts) -> None:
+        """Extra virtual obstacles (map frame). Not cleared by zone-except."""
+        self._zone_keepout[str(key)] = list(pts)
+        self.node.get_logger().info(
+            f"KEEPOUT {key} n={len(self._zone_keepout[str(key)])}"
         )
         self._publish_zone_keepout()
 
@@ -1093,6 +1238,48 @@ class MotionHelpers:
         )
         return False
 
+    def snap_yaw_map(
+        self,
+        yaw: float,
+        *,
+        tol: float = 0.18,
+        max_wz: float = 0.55,
+        timeout: float = 5.0,
+    ) -> bool:
+        """In-place turn to a map yaw. Used when Nav2 stops XY-close but facing away."""
+        cur = self.get_base_xy_yaw_map()
+        if cur is None:
+            return False
+        rem0 = float(self._wrap_pi(float(yaw) - float(cur[2])))
+        if abs(rem0) <= float(tol):
+            return True
+        self.node.get_logger().info(
+            f"SNAP_YAW rem={rem0:+.2f}rad → map yaw={float(yaw):+.2f}"
+        )
+        owned = self.drive_owner == "local"
+        if not owned:
+            self.enter_local_mode(settle_sec=0.02)
+        try:
+
+            def _rem():
+                c = self.get_base_xy_yaw_map()
+                if c is None:
+                    return None
+                return float(self._wrap_pi(float(yaw) - float(c[2])))
+
+            return self.aim_yaw_to_bearing(
+                rem0,
+                yaw_gain=1.0,
+                max_wz=float(max_wz),
+                tol=float(tol),
+                timeout=float(timeout),
+                bearing_fn=_rem,
+            )
+        finally:
+            self.stop_chassis()
+            if not owned:
+                self.exit_local_mode()
+
     def aim_yaw_to_bearing(
         self,
         bearing_rad: float,
@@ -1203,18 +1390,20 @@ class MotionHelpers:
             f"SCAN_MAP → {color}_{cube_id} map=({mx:.2f},{my:.2f}) "
             f"先正对再±扫，直到看见色块"
         )
+        # 先正对；扫的时候用调用方角速度，别再压到 0.14 一点点转
+        scan_wz = min(0.55, max(0.28, float(abs(max_wz))))
         rem0 = _face_rem()
-        if rem0 is not None and abs(rem0) > 0.12:
+        if rem0 is not None and abs(rem0) > 0.25:
             self.aim_yaw_to_bearing(
                 float(rem0),
-                yaw_gain=0.85,
-                max_wz=float(max_wz),
-                tol=0.10,
-                timeout=min(6.0, abs(rem0) / max(max_wz, 0.08) + 1.2),
+                yaw_gain=0.50,
+                max_wz=scan_wz,
+                tol=0.22,
+                timeout=min(3.5, abs(rem0) / max(scan_wz, 0.08) + 0.8),
                 bearing_fn=_face_rem,
             )
             self.stop_chassis()
-            time.sleep(0.06)
+            time.sleep(0.05)
 
         _bgr, blob = _try_see()
         if blob is not None and float(blob.area) >= min_area:
@@ -1223,33 +1412,23 @@ class MotionHelpers:
             )
             return True
 
-        # Sweep about face heading — wider for flaky FOV (e.g. blue near zone B)
-        offsets = [0.0]
-        for k in (1, 2, 3, 4, 5, 6):
-            d = 0.22 * k
-            offsets.extend([d, -d])
+        # 窄扫：±约 35°，步进小；看见就停，不要一路拧过去
+        offsets = [0.0, 0.12, -0.12, 0.24, -0.24, 0.36, -0.36, 0.48, -0.48]
         last_off = 0.0
         t0 = time.time()
         for off in offsets:
             if time.time() - t0 > timeout:
                 break
-            rem_face = _face_rem()
-            if rem_face is None:
-                delta = float(off - last_off)
-            else:
-                target_rem = float(rem_face) + float(off)
-                delta = float(off - last_off)
-                if abs(target_rem) > abs(delta) + 0.05:
-                    delta = float(self._wrap_pi(target_rem))
+            delta = float(off - last_off)
             if abs(delta) > 0.04:
                 self.node.get_logger().info(
                     f"SCAN_MAP off={off:+.2f} spin={delta:+.3f} "
                     f"找 {color}_{cube_id}",
                     throttle_duration_sec=0.2,
                 )
-                self.spin_yaw_openloop(delta, max_wz=max_wz, timeout=4.0)
+                self.spin_yaw_openloop(delta, max_wz=scan_wz, timeout=2.2)
                 self.stop_chassis()
-                time.sleep(0.10)
+                time.sleep(0.08)
             last_off = float(off)
             _bgr, blob = _try_see()
             if blob is not None and float(blob.area) >= min_area:
@@ -1259,8 +1438,10 @@ class MotionHelpers:
                 return True
 
         rem_back = _face_rem()
-        if rem_back is not None and abs(rem_back) > 0.12:
-            self.spin_yaw_openloop(float(rem_back), max_wz=max_wz, timeout=4.0)
+        if rem_back is not None and abs(rem_back) > 0.25:
+            self.spin_yaw_openloop(
+                float(rem_back), max_wz=scan_wz, timeout=2.0
+            )
         self.stop_chassis()
         self.node.get_logger().warn(
             f"SCAN_MAP MISS {color}_{cube_id} — 仍无色块，交 OpenCV 再试"
@@ -2239,7 +2420,7 @@ class MotionHelpers:
                 f"SEE miss → 慢速小扫 ±{sweep_yaw_rad:.2f}rad"
             )
             found = False
-            sweep_wz = min(float(max_wz), 0.18)
+            sweep_wz = min(float(max_wz), 0.45)
             for sign in (+1.0, -1.0, +1.0, -1.0, 0.0):
                 if found:
                     break
@@ -2713,6 +2894,25 @@ class MotionHelpers:
         req.link2_name = "link"
         self.node.get_logger().info(f"DETACH {req.model2_name}")
         fut = self.detach_cli.call_async(req)
+        if not self._spin_until(fut, 4.0):
+            return False
+        res = fut.result()
+        return bool(res and res.success)
+
+    def attach_cube_to_zone(self, color: str, cube_id: int, zone: str) -> bool:
+        """Stick placed cube to zone pad (A/B/C) so chassis bumps cannot knock it out."""
+        z = str(zone).strip().upper()
+        if z not in ("A", "B", "C"):
+            return True
+        req = AttachLink.Request()
+        req.model1_name = f"zone_{z.lower()}"
+        req.link1_name = "base"
+        req.model2_name = f"{color}_cube_{cube_id}"
+        req.link2_name = "link"
+        self.node.get_logger().info(
+            f"ZONE_STICK {req.model2_name} → {req.model1_name}"
+        )
+        fut = self.attach_cli.call_async(req)
         if not self._spin_until(fut, 4.0):
             return False
         res = fut.result()

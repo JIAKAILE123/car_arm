@@ -466,8 +466,8 @@
       "diffTopicPath": "",
       "showFullMessageForDiff": false,
       "topicPath": "/viz/counts.data",
-      "fontSize": 26,
-      "foxglovePanelTitle": "资源数量"
+      "fontSize": 22,
+      "foxglovePanelTitle": "颜色数量与放置区"
     },
     "RawMessages!viz_o": {
       "diffEnabled": false,
@@ -504,6 +504,125 @@
       "topicPath": "/viz/elapsed.data",
       "fontSize": 28,
       "foxglovePanelTitle": "【测试】总用时"
+    },
+    "RawMessages!viz_map": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/viz/mapping_rule.data",
+      "fontSize": 20,
+      "foxglovePanelTitle": "映射规则①"
+    },
+    "Indicator!red_n": {
+      "path": "/viz/red_count.data",
+      "style": "background",
+      "fontSize": 48,
+      "fallbackColor": "#eb6774",
+      "fallbackLabel": "-",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "0",
+          "color": "#eb6774",
+          "label": "0"
+        },
+        {
+          "operator": "=",
+          "rawValue": "1",
+          "color": "#eb6774",
+          "label": "1"
+        },
+        {
+          "operator": "=",
+          "rawValue": "2",
+          "color": "#eb6774",
+          "label": "2"
+        },
+        {
+          "operator": "=",
+          "rawValue": "3",
+          "color": "#eb6774",
+          "label": "3"
+        },
+        {
+          "operator": "=",
+          "rawValue": "4",
+          "color": "#eb6774",
+          "label": "4"
+        },
+        {
+          "operator": "=",
+          "rawValue": "5",
+          "color": "#eb6774",
+          "label": "5"
+        }
+      ],
+      "foxglovePanelTitle": "红色数量"
+    },
+    "Indicator!blue_n": {
+      "path": "/viz/blue_count.data",
+      "style": "background",
+      "fontSize": 48,
+      "fallbackColor": "#2b5def",
+      "fallbackLabel": "-",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "0",
+          "color": "#2b5def",
+          "label": "0"
+        },
+        {
+          "operator": "=",
+          "rawValue": "1",
+          "color": "#2b5def",
+          "label": "1"
+        },
+        {
+          "operator": "=",
+          "rawValue": "2",
+          "color": "#2b5def",
+          "label": "2"
+        },
+        {
+          "operator": "=",
+          "rawValue": "3",
+          "color": "#2b5def",
+          "label": "3"
+        },
+        {
+          "operator": "=",
+          "rawValue": "4",
+          "color": "#2b5def",
+          "label": "4"
+        },
+        {
+          "operator": "=",
+          "rawValue": "5",
+          "color": "#2b5def",
+          "label": "5"
+        }
+      ],
+      "foxglovePanelTitle": "蓝色数量"
+    },
+    "RawMessages!red_z": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/viz/red_zone.data",
+      "fontSize": 28,
+      "foxglovePanelTitle": "红色去向"
+    },
+    "RawMessages!blue_z": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/viz/blue_zone.data",
+      "fontSize": 28,
+      "foxglovePanelTitle": "蓝色去向"
     }
   },
   "globalVariables": {
@@ -515,7 +634,7 @@
   },
   "layout": {
     "direction": "row",
-    "splitPercentage": 55,
+    "splitPercentage": 52,
     "first": {
       "direction": "column",
       "splitPercentage": 78,
@@ -524,46 +643,68 @@
     },
     "second": {
       "direction": "column",
-      "splitPercentage": 22,
+      "splitPercentage": 14,
       "first": "Publish!20rffgt",
       "second": {
         "direction": "column",
-        "splitPercentage": 55,
-        "first": {
-          "direction": "column",
-          "splitPercentage": 50,
-          "first": {
-            "direction": "row",
-            "first": "RawMessages!viz_q",
-            "second": "RawMessages!viz_c"
-          },
-          "second": {
-            "direction": "row",
-            "first": "RawMessages!viz_o",
-            "second": "RawMessages!viz_p"
-          }
-        },
+        "splitPercentage": 18,
+        "first": "RawMessages!viz_map",
         "second": {
           "direction": "column",
-          "splitPercentage": 40,
+          "splitPercentage": 28,
           "first": {
-            "direction": "column",
-            "splitPercentage": 35,
-            "first": "RawMessages!viz_t",
-            "second": "RawMessages!viz_w"
-          },
-          "second": {
             "direction": "column",
             "splitPercentage": 50,
             "first": {
               "direction": "row",
-              "first": "Indicator!3c2k9pj",
-              "second": "Indicator!s4663u"
+              "first": "Indicator!red_n",
+              "second": "Indicator!blue_n"
             },
             "second": {
               "direction": "row",
-              "first": "Indicator!2lw9qd9",
-              "second": "Indicator!3cv0og"
+              "first": "RawMessages!red_z",
+              "second": "RawMessages!blue_z"
+            }
+          },
+          "second": {
+            "direction": "column",
+            "splitPercentage": 40,
+            "first": {
+              "direction": "row",
+              "first": "RawMessages!viz_q",
+              "second": "RawMessages!viz_c"
+            },
+            "second": {
+              "direction": "column",
+              "splitPercentage": 45,
+              "first": {
+                "direction": "row",
+                "first": "RawMessages!viz_o",
+                "second": "RawMessages!viz_p"
+              },
+              "second": {
+                "direction": "column",
+                "splitPercentage": 35,
+                "first": {
+                  "direction": "row",
+                  "first": "RawMessages!viz_t",
+                  "second": "RawMessages!viz_w"
+                },
+                "second": {
+                  "direction": "column",
+                  "splitPercentage": 50,
+                  "first": {
+                    "direction": "row",
+                    "first": "Indicator!3c2k9pj",
+                    "second": "Indicator!s4663u"
+                  },
+                  "second": {
+                    "direction": "row",
+                    "first": "Indicator!2lw9qd9",
+                    "second": "Indicator!3cv0og"
+                  }
+                }
+              }
             }
           }
         }

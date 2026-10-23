@@ -21,21 +21,24 @@ from std_msgs.msg import Header
 # axis 'x': x = mid + amp*sin, y fixed
 # axis 'y': y = mid + amp*sin, x fixed
 # tuple: (axis, fixed, mid, amp, phase, period, half_x, half_y)
+# 上杆东端贴近 +X 墙：预测 footprint 勿画满到墙缝，否则转弯卡死
 _OBS = (
-    ("x", -1.35, -0.80, 1.95, 0.0, 31.0, 0.252, 0.26),
-    ("x", -6.15, -0.65, 1.65, 1.2, 33.67, 0.252, 0.26),
-    ("y", -2.00, 0.00, 2.50, 2.4, 45.0, 0.252, 0.26),
+    ("x", -1.35, -0.80, 1.95, 0.0, 31.0, 0.22, 0.22),
+    ("x", -6.15, -0.65, 1.65, 1.2, 33.67, 0.22, 0.22),
+    ("y", -2.00, 0.00, 2.50, 2.4, 45.0, 0.22, 0.22),
 )
+# 上杆(y=-1.35)东侧墙约 x=1.80：预测中心 x 上限留缝给转弯
+_OBS1_X_CLIP = 0.90
 
 
 class DynObsPredict(Node):
     def __init__(self) -> None:
         super().__init__("dyn_obs_predict")
         # 仅加强杆预测；不改 DWB/膨胀（避免物块旁空转）
-        self.declare_parameter("horizon_sec", 2.2)
-        self.declare_parameter("dt_sec", 0.20)
+        self.declare_parameter("horizon_sec", 1.6)
+        self.declare_parameter("dt_sec", 0.22)
         self.declare_parameter("rate_hz", 10.0)
-        self.declare_parameter("step_m", 0.07)
+        self.declare_parameter("step_m", 0.08)
         self._pub = self.create_publisher(PointCloud2, "/yzbot/dyn_obs_predict", 1)
         hz = max(2.0, float(self.get_parameter("rate_hz").value))
         self.create_timer(1.0 / hz, self._tick)
@@ -68,7 +71,9 @@ class DynObsPredict(Node):
         step = max(0.06, float(self.get_parameter("step_m").value))
         pts: List[Tuple[float, float, float]] = []
         n = int(horizon / dt) + 1
-        for axis, fixed, mid, amp, phase, period, hx, hy in _OBS:
+        for oi, (axis, fixed, mid, amp, phase, period, hx, hy) in enumerate(
+            _OBS
+        ):
             for i in range(n):
                 t = t0 + i * dt
                 s = mid + amp * math.sin(
@@ -78,6 +83,9 @@ class DynObsPredict(Node):
                     x, y = float(fixed), float(s)
                 else:
                     x, y = float(s), float(fixed)
+                    # 上杆：别把预测画进东墙缝，留转弯通道
+                    if oi == 0:
+                        x = min(x, float(_OBS1_X_CLIP))
                 pts.extend(self._footprint(x, y, hx, hy, step))
         header = Header()
         header.stamp = self.get_clock().now().to_msg()

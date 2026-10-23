@@ -381,15 +381,40 @@ def approach_xy_for_cube(
         so_b = max(so, 0.60)
         cid = int(cube_id)
 
-        # blue#1 / #3: park WEST, face +X (camera on cube, clear of neighbors).
-        if cid in (1, 3):
+        # blue#1：东侧贴墙。停在来向的北/南/西，目标 yaw 就是面对方块，
+        # 避免西停朝东、开过来还要再拧 90°。
+        if cid == 1:
+            so1 = max(so_b, 0.65)
+            if robot_xy is not None:
+                rx, ry = float(robot_xy[0]), float(robot_xy[1])
+                if abs(ry - float(cy)) >= abs(rx - float(cx)):
+                    if ry >= float(cy):
+                        ax, ay = float(cx), float(cy) + so1
+                    else:
+                        ax, ay = float(cx), float(cy) - so1
+                else:
+                    ax, ay = float(cx) - so1, float(cy)
+            else:
+                ax, ay = float(cx), float(cy) + so1
+            # 只改蓝1目标朝向：到点常少转约 8°，目标再往方块一侧补一点
+            yaw = _face(ax, ay)
+            if ay > float(cy):
+                yaw += 0.14
+            elif ay < float(cy):
+                yaw -= 0.14
+            else:
+                yaw += 0.10
+            return ax, ay, float(np.arctan2(np.sin(yaw), np.cos(yaw)))
+
+        # blue#3: park WEST, face +X (camera on cube, clear of neighbors).
+        if cid == 3:
             ax, ay = float(cx) - so_b, float(cy)
             return ax, ay, _face(ax, ay)
 
-        # blue#5 near zone B south — park NORTH, face south.
+        # blue#5：C 区往南。停在 x 正侧，车头朝西对块，不绕到北侧。
         if cid == 5:
-            so5 = max(so_b, 0.72)
-            ax, ay = float(cx), float(cy) + so5
+            so5 = max(so_b, 0.70)
+            ax, ay = float(cx) + so5, float(cy)
             return ax, ay, _face(ax, ay)
 
         # blue#4: park WEST (x−), face +X toward the cube.
@@ -419,19 +444,27 @@ def approach_xy_for_cube(
     so_r = max(float(standoff_m), 0.55)
     cid = int(cube_id)
 
-    # red#2: always park EAST (x+) so Nav2 does not cross over the cube.
+    # red#2：固定停在物块东侧同 y（map x=-4.5），车体与 x 轴平行、朝西正对块。
+    # 物块约 (-5.20, 0.00)；停 (-4.5, cy) → yaw=π（−X）。
     if cid == 2:
-        ax, ay = float(cx) + so_r, float(cy)
-        return ax, ay, _face(ax, ay)
+        ax, ay = -4.5, float(cy)
+        return ax, ay, float(np.pi)
 
     # red#1 near blue#3 / zone A — park WEST.
     if cid == 1:
         ax, ay = float(cx) - so_r, float(cy)
         return ax, ay, _face(ax, ay)
 
-    # red#4 south-east of cluster — park EAST (open side).
+    # red#3：西停朝东，第一次停车正对块
+    if cid == 3:
+        so3 = max(so_r, 0.58)
+        ax, ay = float(cx) - so3, float(cy)
+        return ax, ay, _face(ax, ay)
+
+    # red#4：东停朝西，第一次就对块
     if cid == 4:
-        ax, ay = float(cx) + so_r, float(cy)
+        so4 = max(so_r, 0.58)
+        ax, ay = float(cx) + so4, float(cy)
         return ax, ay, _face(ax, ay)
 
     if robot_xy is None:

@@ -3,7 +3,12 @@
 评分面板话题：
   /viz/question      当前任务题目
   /viz/grasp_order   抓取顺序
-  /viz/counts        资源数量与放置区
+  /viz/counts        资源数量与放置区（含映射规则）
+  /viz/mapping_rule  赛前映射规则原文
+  /viz/red_count     红色数量 Int32（x）
+  /viz/blue_count    蓝色数量 Int32（y）
+  /viz/red_zone      红色放置区文案 如「红色 → A区」
+  /viz/blue_zone     蓝色放置区文案
   /viz/progress      任务进度
   /viz/work_state    当前工作状态
   /viz/elapsed       【测试用】总用时（赛前可 -p show_elapsed:=false）
@@ -14,13 +19,16 @@
   /task   0=蓝色任务 1=红色任务
   /pick   0=抓取完成 1=放置完成
   /cur    0=待机 1=前往取货 2=抓取作业 3=前往放置
+
+默认映射规则①：
+  x=红色，y=蓝色；数量≥3 → A区，否则 → C区
 """
 
 from __future__ import annotations
 
 import re
 import time
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import rclpy
 from rclpy.node import Node
@@ -75,18 +83,67 @@ def _format_command_cn(cmd: str) -> str:
     return "；".join(parts) if parts else cmd
 
 
-def _format_counts(xy: str, cmd: str) -> str:
+def _parse_xy(xy: str, cmd: str) -> Tuple[Optional[int], Optional[int]]:
+    """Prefer /llm_xy；否则从 [red,n,Z;blue,m,W] 累计。"""
     mx = re.search(r"x\s*=\s*(\d+)", xy or "", re.I)
     my = re.search(r"y\s*=\s*(\d+)", xy or "", re.I)
-    lines: List[str] = []
-    if mx or my:
-        x = mx.group(1) if mx else "?"
-        y = my.group(1) if my else "?"
-        lines.append(f"解题结果：x={x}（红色），y={y}（蓝色）")
+    x = int(mx.group(1)) if mx else None
+    y = int(my.group(1)) if my else None
+    if x is not None and y is not None:
+        return x, y
+    red = blue = 0
+    found = False
+    for m in re.finditer(r"(red|blue)\s*,\s*(\d+)\s*,\s*[ABC]", cmd or "", re.I):
+        found = True
+        if m.group(1).lower() == "red":
+            red += int(m.group(2))
+        else:
+            blue += int(m.group(2))
+    for m in re.finditer(r"(red|blue)\s*#\s*\d+\s*,\s*[ABC]", cmd or "", re.I):
+        found = True
+        if m.group(1).lower() == "red":
+            red += 1
+        else:
+            blue += 1
+    if found:
+        return (red if x is None else x), (blue if y is None else y)
+    return x, y
+
+
+def _zone_for(n: int, threshold: int, high: str, low: str) -> str:
+    return high if int(n) >= int(threshold) else low
+
+
+def _format_counts(
+    xy: str,
+    cmd: str,
+    *,
+    rule_text: str,
+    threshold: int,
+    high_zone: str,
+    low_zone: str,
+) -> str:
+    x, y = _parse_xy(xy, cmd)
+    lines: List[str] = [f"映射规则：{rule_text}"]
+    if x is not None:
+        zx = _zone_for(x, threshold, high_zone, low_zone)
+        # 若命令里已写明红色区，以命令为准
+        m = re.search(r"red\s*,\s*\d+\s*,\s*([ABC])", cmd or "", re.I)
+        if m:
+            zx = m.group(1).upper()
+        lines.append(f"红色数量 x={x} → {zx}区")
+    if y is not None:
+        zy = _zone_for(y, threshold, high_zone, low_zone)
+        m = re.search(r"blue\s*,\s*\d+\s*,\s*([ABC])", cmd or "", re.I)
+        if m:
+            zy = m.group(1).upper()
+        lines.append(f"蓝色数量 y={y} → {zy}区")
     mapped = _format_command_cn(cmd)
     if mapped and mapped != "待生成":
         lines.append(f"抓取任务：{mapped}")
-    return "\n".join(lines) if lines else "等待大模型解析"
+    if len(lines) == 1:
+        lines.append("等待大模型解析颜色与数量")
+    return "\n".join(lines)
 
 
 def _format_plan_cn(plan: str, cmd: str) -> str:
@@ -101,12 +158,27 @@ class VizBridge(Node):
     def __init__(self):
         super().__init__("viz_bridge")
         self.declare_parameter("show_elapsed", True)  # 测试总用时；赛场改 false
+        # 映射规则①（省赛自选）：x=红 y=蓝；≥threshold→high 否则→low
+        self.declare_parameter("x_color", "red")
+        self.declare_parameter("y_color", "blue")
+        self.declare_parameter("threshold", 3)
+        self.declare_parameter("high_zone", "A")
+        self.declare_parameter("low_zone", "C")
+        self.declare_parameter(
+            "mapping_rule_text",
+            "① x代表红色，y代表蓝色；数值≥3去A区，其他去C区",
+        )
 
         qos = _latched_qos()
 
         self.pub_q = self.create_publisher(String, "/viz/question", qos)
         self.pub_order = self.create_publisher(String, "/viz/grasp_order", qos)
         self.pub_counts = self.create_publisher(String, "/viz/counts", qos)
+        self.pub_mapping = self.create_publisher(String, "/viz/mapping_rule", qos)
+        self.pub_red_count = self.create_publisher(Int32, "/viz/red_count", qos)
+        self.pub_blue_count = self.create_publisher(Int32, "/viz/blue_count", qos)
+        self.pub_red_zone = self.create_publisher(String, "/viz/red_zone", qos)
+        self.pub_blue_zone = self.create_publisher(String, "/viz/blue_zone", qos)
         self.pub_progress = self.create_publisher(String, "/viz/progress", qos)
         self.pub_work = self.create_publisher(String, "/viz/work_state", qos)
         self.pub_elapsed = self.create_publisher(String, "/viz/elapsed", qos)
@@ -127,6 +199,10 @@ class VizBridge(Node):
         self._total = 0
         self._cur_color: Optional[str] = None
         self._phase = "idle"
+        self._red_n: Optional[int] = None
+        self._blue_n: Optional[int] = None
+        self._red_zone_txt = "红色 → 待映射"
+        self._blue_zone_txt = "蓝色 → 待映射"
 
         self._t0: Optional[float] = None
         self._t_stop: Optional[float] = None
@@ -145,8 +221,42 @@ class VizBridge(Node):
         self._publish_ints(color=0, task=0, pick=-1, cur=0)
         self._flush()
         self.get_logger().info(
-            "viz_bridge ready（测试总用时 /viz/elapsed；赛场 -p show_elapsed:=false）"
+            "viz_bridge ready（规则①：红/蓝数量+放置区面板；"
+            "测试总用时 /viz/elapsed；赛场 -p show_elapsed:=false）"
         )
+
+    def _rule_text(self) -> str:
+        return str(self.get_parameter("mapping_rule_text").value)
+
+    def _threshold(self) -> int:
+        return int(self.get_parameter("threshold").value)
+
+    def _high_zone(self) -> str:
+        return str(self.get_parameter("high_zone").value).upper()
+
+    def _low_zone(self) -> str:
+        return str(self.get_parameter("low_zone").value).upper()
+
+    def _refresh_xy_zones(self):
+        x, y = _parse_xy(self._xy, self._command)
+        self._red_n, self._blue_n = x, y
+        thr = self._threshold()
+        hi, lo = self._high_zone(), self._low_zone()
+        # 命令里显式区优先
+        zx = zy = None
+        if self._command:
+            mr = re.search(r"red\s*,\s*\d+\s*,\s*([ABC])", self._command, re.I)
+            mb = re.search(r"blue\s*,\s*\d+\s*,\s*([ABC])", self._command, re.I)
+            if mr:
+                zx = mr.group(1).upper()
+            if mb:
+                zy = mb.group(1).upper()
+        if x is not None and zx is None:
+            zx = _zone_for(x, thr, hi, lo)
+        if y is not None and zy is None:
+            zy = _zone_for(y, thr, hi, lo)
+        self._red_zone_txt = f"红色 → {zx}区" if zx else "红色 → 待映射"
+        self._blue_zone_txt = f"蓝色 → {zy}区" if zy else "蓝色 → 待映射"
 
     def _show_elapsed(self) -> bool:
         return bool(self.get_parameter("show_elapsed").value)
@@ -215,7 +325,15 @@ class VizBridge(Node):
             msg.data = text
             pub.publish(msg)
 
-        counts = _format_counts(self._xy, self._command)
+        self._refresh_xy_zones()
+        counts = _format_counts(
+            self._xy,
+            self._command,
+            rule_text=self._rule_text(),
+            threshold=self._threshold(),
+            high_zone=self._high_zone(),
+            low_zone=self._low_zone(),
+        )
         order = _format_plan_cn(self._plan, self._command)
         progress = self._progress_line()
         work = self._work
@@ -225,6 +343,13 @@ class VizBridge(Node):
         _s(self.pub_q, self._question)
         _s(self.pub_order, order)
         _s(self.pub_counts, counts)
+        _s(self.pub_mapping, self._rule_text())
+        _s(self.pub_red_zone, self._red_zone_txt)
+        _s(self.pub_blue_zone, self._blue_zone_txt)
+        if self._red_n is not None:
+            self.pub_red_count.publish(Int32(data=int(self._red_n)))
+        if self._blue_n is not None:
+            self.pub_blue_count.publish(Int32(data=int(self._blue_n)))
         _s(self.pub_progress, progress)
         _s(self.pub_work, work)
         if self._show_elapsed():
@@ -232,7 +357,12 @@ class VizBridge(Node):
 
         chat_lines = [
             f"【任务题目】{self._question}",
+            f"【映射规则】{self._rule_text()}",
             f"【资源数量】{counts.replace(chr(10), '；')}",
+            f"【红色】{self._red_zone_txt}"
+            + (f" 数量={self._red_n}" if self._red_n is not None else ""),
+            f"【蓝色】{self._blue_zone_txt}"
+            + (f" 数量={self._blue_n}" if self._blue_n is not None else ""),
             f"【抓取顺序】{order}",
             f"【任务进度】{progress}",
             f"【工作状态】{work}",

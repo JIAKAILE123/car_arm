@@ -45,6 +45,7 @@ struct JointSTRUCT
   std::string link2;
   gazebo::physics::LinkPtr l2;
   gazebo::physics::JointPtr joint;
+  std::string joint_name;
 };
 
 namespace gazebo_ros
