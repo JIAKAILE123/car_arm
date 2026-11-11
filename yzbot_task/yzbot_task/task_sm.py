@@ -39,7 +39,10 @@ from yzbot_task.motion import (
 )
 from yzbot_task.vision_align import (
     annotate_bgr,
+    blob_area_frac,
     detect_blob,
+    detect_green_pad,
+    green_pad_centered,
     is_visual_lock,
 )
 from yzbot_task.vision_pose import (
@@ -84,7 +87,7 @@ class TaskStateMachine(Node):
         self.declare_parameter("align_timeout", 7.9)
         # 降增益/角速度：少拧过头再拧回（差速+脚轮惯性大）
         self.declare_parameter("align_yaw_gain", 0.50)
-        self.declare_parameter("align_max_wz", 0.16)
+        self.declare_parameter("align_max_wz", 0.14)
         self.declare_parameter("local_settle_sec", 0.02)
         # Nav2 often stops ~0.5–0.8m short (inflation); soft gate then continuous local
         self.declare_parameter("pose_gate_xy", 0.55)
@@ -109,13 +112,9 @@ class TaskStateMachine(Node):
         # 沿长边(X≈1.0m)往区内收；短边(Y≈0.5m)只允许很小侧偏
         self.declare_parameter("place_inward_m", 0.18)
         self.declare_parameter("place_park_extra_m", 0.0)
-        # 放置不再做最后的视觉纠正，到区左右就放
-        self.declare_parameter("place_vision_enable", False)
-        self.declare_parameter("place_vision_timeout", 2.8)
+        # 去放置区的路上预计算绿垫，不发速度；到点不再停 4 秒对垫。
+        self.declare_parameter("place_vision_enable", True)
         self.declare_parameter("place_vision_target_cy", 0.58)
-        # 门阀：|err_u|/|err_v| 低于此认为「大概到位」，不启用视觉操控
-        self.declare_parameter("place_vision_gate_u", 0.22)
-        self.declare_parameter("place_vision_gate_v", 0.20)
         # known_coords = 按官方序号固定坐标：导航到物块前方 → 预设臂 → 吸附
         self.declare_parameter("grasp_mode", "known_coords")
         self.declare_parameter("prefer_joint_pick", True)
@@ -168,6 +167,12 @@ class TaskStateMachine(Node):
         self._zone_place_count = {"A": 0, "B": 0, "C": 0}
         # Attached cube not yet dropped — must place before next pick
         self._holding: Optional[Tuple[str, int, str]] = None
+        self._place_vis_stop: Optional[threading.Event] = None
+        self._place_vis_thread: Optional[threading.Thread] = None
+        self._place_vis_lock = threading.Lock()
+        self._place_vis_sample: Optional[dict] = None
+        self._place_vis_zone: Optional[Tuple[float, float, float, float, float, float]] = None
+        self._place_vis_ahead: Optional[dict] = None
         self.create_timer(2.0, self._maybe_rebind_image, callback_group=self.cb_group)
         self._image_rebound = False
 
@@ -213,6 +218,29 @@ class TaskStateMachine(Node):
                     wall_pts.append((x, y, 0.25))
                 y += 0.08
             self.motion.add_named_keepout("WALL75", wall_pts)
+            # 这面竖墙东侧（x≈-3.2）和活动杆之间只剩约 0.9m。
+            # 从南边贴墙上来会卡在 y≈-1.2，杆再过来就把车挤进墙里弹飞。
+            # 只封这条缝，不改墙，东边绕开杆的路还在。
+            pinch_pts = []
+            y = -2.40
+            while y <= -1.00 + 1e-9:
+                x = -3.05
+                while x <= -2.55 + 1e-9:
+                    pinch_pts.append((x, y, 0.25))
+                    x += 0.10
+                y += 0.10
+            self.motion.add_named_keepout("WALL_PINCH", pinch_pts)
+            # 斜墙，从 (1.85,-1.4) 往东南。车在西侧贴着走。
+            # 跟红2那面墙一样，只沿墙身标一窄条，靠膨胀把车稍微推离墙。
+            diag_pts = []
+            y = -1.40
+            nx, ny = -0.775, -0.630
+            while y >= -2.20 - 1e-9:
+                x = 1.85 - 0.8125 * (y + 1.4)
+                for off in (0.0, 0.10, 0.18):
+                    diag_pts.append((x + off * nx, y + off * ny, 0.25))
+                y -= 0.08
+            self.motion.add_named_keepout("WALL_DIAG", diag_pts)
             self.motion.clear_placed_keepouts()
         except Exception as exc:  # noqa: BLE001
             self.get_logger().warn(f"zone keepout init skipped: {exc}")
@@ -294,7 +322,7 @@ class TaskStateMachine(Node):
         if abs(rem) < 0.8:
             return
         self._pub_status(f"FACE_TRAVEL 先调头 {abs(rem)*180/math.pi:.0f}° 再前进")
-        self.motion.snap_yaw_map(float(yaw), tol=0.28, max_wz=0.45, timeout=4.5)
+        self.motion.snap_yaw_map(float(yaw), tol=0.28, max_wz=0.40, timeout=4.5)
 
     def _pose(self, key: str):
         p = self.poses[key]
@@ -308,12 +336,13 @@ class TaskStateMachine(Node):
         return str(zone).strip().upper() in ("A", "B")
 
     def _place_slot_xy(self, zx: float, zy: float, zone: str) -> Tuple[float, float, int]:
-        """同区多块：沿长边左右错开，仍落在字母区里。"""
+        """Same-zone multi-place: keep first on center; later tiny Y only."""
         zkey = str(zone).strip().upper()
         n = int(self._zone_place_count.get(zkey, 0))
-        slots_x = (0.0, 0.16, -0.16, 0.28, -0.28)
-        dx = float(slots_x[n % len(slots_x)])
-        return float(zx) + dx, float(zy), n
+        # 同区多块：只在短边(Y)上小错开，勿贴短边外
+        slots_y = (0.0, 0.025, -0.025, 0.04, -0.04)
+        dy = float(slots_y[n % len(slots_y)])
+        return float(zx), float(zy) + dy, n
 
     def _place_drop_inward(
         self, tx: float, ty: float, zx: float, zy: float, *, zone: str = ""
@@ -326,8 +355,8 @@ class TaskStateMachine(Node):
         inward = float(self.get_parameter("place_inward_m").value)
         if str(zone).strip().upper() == "B":
             inward = max(inward, 0.0) + 0.05
-        # 长边左右可偏一点；短边仍贴中，避免推出区
-        max_dx, max_dy = 0.40, 0.16
+        # 长边半长 0.5 → 夹 ±0.32；短边半宽 0.25 → 夹 ±0.12
+        max_dx, max_dy = 0.32, 0.12
         cur = self.motion.get_base_xy_yaw_map()
         rx = float(cur[0]) if cur is not None else float(tx) - 1.0
         from_west = (rx - (tx - 0.1)) ** 2 <= (rx - (tx + 0.1)) ** 2
@@ -884,7 +913,7 @@ class TaskStateMachine(Node):
                     cid,
                     target_range=creep_r,
                     max_vx=0.10,
-                    max_wz=0.16,
+                    max_wz=0.14,
                     timeout=8.0,
                 ):
                     return True
@@ -971,7 +1000,7 @@ class TaskStateMachine(Node):
                 target_range=target,
                 min_range=min_r,
                 max_vx=0.12,
-                max_wz=0.28,
+                max_wz=0.24,
                 timeout=3.8,
             )
             r1 = _rng()
@@ -991,7 +1020,7 @@ class TaskStateMachine(Node):
         """
         settle = float(self.get_parameter("local_settle_sec").value)
         # 夹取正对：慢转对准 map 目标块（保证相机前就是该序号，不是去扫别的）
-        max_wz = min(0.14, float(self.get_parameter("align_max_wz").value))
+        max_wz = min(0.12, float(self.get_parameter("align_max_wz").value))
         yaw_gain = min(0.55, float(self.get_parameter("align_yaw_gain").value))
         mx, my, _mz = known_cube_xy(color, cid)
         tol = 0.16
@@ -1693,6 +1722,9 @@ class TaskStateMachine(Node):
                     self.get_parameter("place_park_extra_m").value
                 )
                 if not skip_nav:
+                    self._start_place_vision_preview(
+                        zx_h, zy_h, arm_m, tx_h, ty_h, park_m
+                    )
                     self.motion.set_keepout_except(hz, clear_maps=False)
                     self.motion.navigate_place_zone(
                         tx_h, ty_h, xy_tol=0.28, approach_standoff=park_m
@@ -1945,9 +1977,9 @@ class TaskStateMachine(Node):
                         ),
                         yaw_gain=float(self.get_parameter("align_yaw_gain").value),
                         max_wz=min(
-                            0.14, float(self.get_parameter("align_max_wz").value)
+                            0.12, float(self.get_parameter("align_max_wz").value)
                         ),
-                        max_vx=0.28 if seen0 else 0.22,
+                        max_vx=0.25 if seen0 else 0.20,
                         timeout=oc_timeout,
                         stable_hold_sec=0.10,
                         lock_v_frac=float(self.get_parameter("lock_v_frac").value),
@@ -2012,8 +2044,8 @@ class TaskStateMachine(Node):
                             color,
                             cid,
                             target_range=pick_r,
-                            max_vx=0.20,
-                            max_wz=0.20,
+                            max_vx=0.18,
+                            max_wz=0.17,
                             timeout=3.2,
                         )
                         _unbury_if_under()
@@ -2097,6 +2129,13 @@ class TaskStateMachine(Node):
             tx, ty, _approach_yaw = self._place_drop_inward(
                 tx, ty, zx, zy, zone=zone
             )
+            # 3号蓝回 A：Y 只往负方向移 0.2m。0.5m 会落到垫子南边外面。
+            if (
+                str(color).lower() == "blue"
+                and int(cid) == 3
+                and str(zone).strip().upper() == "A"
+            ):
+                ty = float(ty) - 0.20
             self._pub_status(
                 f"PLACE_TARGET zone={zone} #{slot_i} "
                 f"drop=({tx:.2f},{ty:.2f}) 区心=({zx:.2f},{zy:.2f})"
@@ -2119,6 +2158,9 @@ class TaskStateMachine(Node):
                 blue3_place = str(color).lower() == "blue" and int(cid) == 3
                 if blue3_place and str(zone).strip().upper() == "C":
                     self._face_travel(math.pi)
+                    self._start_place_vision_preview(
+                        zx, zy, arm_m, tx, ty, park_m, from_east=True
+                    )
                     ok_nav = self._nav_through_c_door_then(
                         tx,
                         ty,
@@ -2129,16 +2171,47 @@ class TaskStateMachine(Node):
                         from_east=True,
                     )
                 elif blue3_place:
-                    # 3号蓝在最东：先调头朝西，停在区的 x 正侧往前放，不绕到西侧转身
-                    self._face_travel(math.pi)
+                    # 3号蓝在A区东边：先朝东侧停靠点往前开，到了再对区。
+                    # 路上就追朝西，车会倒着拧，块放不回垫子。
+                    so_b3 = max(0.15, float(park_m))
+                    gx_b3, gy_b3 = float(tx) + so_b3, float(ty)
+                    cur_b3 = self.motion.get_base_xy_yaw_map()
+                    if cur_b3 is not None:
+                        travel_b3 = math.atan2(
+                            gy_b3 - float(cur_b3[1]),
+                            gx_b3 - float(cur_b3[0]),
+                        )
+                    else:
+                        travel_b3 = math.pi
+                    self._face_travel(travel_b3)
+                    self._start_place_vision_preview(
+                        zx, zy, arm_m, tx, ty, park_m, from_east=True
+                    )
                     ok_nav = self.motion.navigate_place_zone(
                         tx,
                         ty,
                         xy_tol=0.22,
                         approach_standoff=park_m,
                         from_east=True,
+                        goal_yaw=travel_b3,
                     )
+                    cur_b3 = self.motion.get_base_xy_yaw_map()
+                    if cur_b3 is not None:
+                        rem_b3 = self.motion._wrap_pi(
+                            math.pi - float(cur_b3[2])
+                        )
+                        if abs(rem_b3) > 0.25:
+                            self._pub_status(
+                                "PLACE_FACE_EAST 东侧停靠后再对区 "
+                                f"{abs(rem_b3) * 180 / math.pi:.0f}°"
+                            )
+                            self.motion.snap_yaw_map(
+                                math.pi, tol=0.22, max_wz=0.28, timeout=3.5
+                            )
                 elif str(zone).strip().upper() == "C":
+                    self._start_place_vision_preview(
+                        zx, zy, arm_m, tx, ty, park_m
+                    )
                     ok_nav = self._nav_through_c_door_then(
                         tx,
                         ty,
@@ -2148,6 +2221,9 @@ class TaskStateMachine(Node):
                         approach_standoff=park_m,
                     )
                 elif self._is_first_red(color, cid) and self._door_via_for_zone(zone):
+                    self._start_place_vision_preview(
+                        zx, zy, arm_m, tx, ty, park_m
+                    )
                     ok_nav = self._nav_continuous_with_door(
                         tx,
                         ty,
@@ -2158,6 +2234,9 @@ class TaskStateMachine(Node):
                     )
                 else:
                     self._skirt_wall_above_a(ty)
+                    self._start_place_vision_preview(
+                        zx, zy, arm_m, tx, ty, park_m
+                    )
                     ok_nav = self.motion.navigate_place_zone(
                         tx, ty, xy_tol=0.22, approach_standoff=park_m
                     )
@@ -2165,13 +2244,7 @@ class TaskStateMachine(Node):
                     self._pub_status(
                         f"NAV_PLACE 软失败 {zone} → 仍本地对区心补进"
                     )
-                self._dock_place_front(
-                    tx,
-                    ty,
-                    front_m=arm_m,
-                    park_m=park_m,
-                    force_east=str(color).lower() == "blue" and int(cid) == 3,
-                )
+                self._dock_place_front(tx, ty, front_m=arm_m, park_m=park_m)
 
             arm_m = float(self.get_parameter("place_front_m").value)
             park_m = arm_m + float(
@@ -2184,6 +2257,9 @@ class TaskStateMachine(Node):
                     f"PLACE_RETRY {color}_{cid} → {zone}（仍持物）"
                 )
                 if not skip_nav:
+                    self._start_place_vision_preview(
+                        zx, zy, arm_m, tx, ty, park_m
+                    )
                     self.motion.set_keepout_except(zone, clear_maps=False)
                     self.motion.navigate_place_zone(
                         tx, ty, xy_tol=0.28, approach_standoff=park_m
@@ -2239,11 +2315,15 @@ class TaskStateMachine(Node):
 
         从 ±X 接近时面对短边：不能停在短边外侧/贴边，要沿长边进到区内。
         """
-        # 绿垫大概范围内即可：长边左右 ±0.45、短边 ±0.22。不要求贴字母正中。
-        del from_west
-        if abs(float(fy) - float(zy)) > 0.22:
+        # 长边(X)半长 0.5，留边 → ±0.40；短边(Y)半宽 0.25，留边 → ±0.14
+        if abs(float(fy) - float(zy)) > 0.14:
             return False
-        if abs(float(fx) - float(zx)) > 0.45:
+        if abs(float(fx) - float(zx)) > 0.40:
+            return False
+        # 禁止停在靠近侧的短边外缘：至少越过短边、靠近区心一侧
+        if from_west is True and float(fx) < float(zx) - 0.18:
+            return False
+        if from_west is False and float(fx) > float(zx) + 0.18:
             return False
         return True
 
@@ -2254,103 +2334,258 @@ class TaskStateMachine(Node):
         *,
         front_m: float = 0.38,
         park_m: Optional[float] = None,
-        force_east: bool = False,
     ) -> None:
-        """放置专用：弧线进区（可边走边轻微转弯），取货逻辑不动。
-
-        偏角大 → 多转少走；大致对准 → 快走 + 轻 wz。
-        避免旧版「弱 wz + 强前进」蹭垫边，也不强制停车纯直行。
-        """
+        """沿长边推进绿垫；短边只允许很小侧偏。朝向大致对着即可。"""
         settle = float(self.get_parameter("local_settle_sec").value)
         arm_m = float(front_m)
         so = max(0.28, float(park_m) if park_m is not None else arm_m)
         cur = self.motion.get_base_xy_yaw_map()
         if cur is None:
+            self._stop_place_vision_preview()
             return
         rx, ry = float(cur[0]), float(cur[1])
+        from_west = (rx - (float(zx) - 0.1)) ** 2 <= (
+            rx - (float(zx) + 0.1)
+        ) ** 2
         cands = [
             (float(zx) - so, float(zy), 0.0),
             (float(zx) + so, float(zy), math.pi),
         ]
-        if force_east:
-            px, py, pyaw = float(zx) + so, float(zy), math.pi
-        else:
-            px, py, pyaw = min(
-                cands, key=lambda p: (p[0] - rx) ** 2 + (p[1] - ry) ** 2
-            )
+        px, py, pyaw = min(
+            cands, key=lambda p: (p[0] - rx) ** 2 + (p[1] - ry) ** 2
+        )
         from_west = abs(px - (float(zx) - so)) < abs(px - (float(zx) + so))
         self._pub_status(
-            f"PLACE_DOCK 弧线进区 → park=({px:.2f},{py:.2f}) "
-            f"区=({zx:.2f},{zy:.2f}) from={'W' if from_west else 'E'}"
+            f"PLACE_DOCK 长边进区/短边对齐 → park=({px:.2f},{py:.2f}) "
+            f"目标=({zx:.2f},{zy:.2f}) from={'W' if from_west else 'E'}"
         )
-        self.motion.enter_local_mode(settle_sec=min(0.03, settle))
+        self.motion.exit_local_mode()
+        # 区前不再重发导航。那一段会边走边转，A 区最容易把车头带歪。
+        self.motion.stop_chassis()
+
+        self.motion.enter_local_mode(settle_sec=min(0.04, settle))
         try:
+            # 到点后只原地对一次区，少转一点，避免拧过再拧回来。
+            c0 = self.motion.get_base_xy_yaw_map()
+            if c0 is not None:
+                rem = self.motion._wrap_pi(pyaw - float(c0[2]))
+                if abs(rem) > 0.22:
+                    turn = float(rem) * 0.75
+                    self._pub_status(
+                        f"PLACE_FACE 原地对区 {abs(turn)*180/math.pi:.0f}°"
+                    )
+                    self.motion.spin_yaw_openloop(
+                        turn, max_wz=0.16, timeout=2.2
+                    )
+                    self.motion.stop_chassis()
+                    time.sleep(0.03)
 
-            def _pred_drop():
-                c = self.motion.get_base_xy_yaw_map()
-                if c is None:
-                    return None
-                yaw = float(c[2])
-                fx = float(c[0]) + arm_m * math.cos(yaw)
-                fy = float(c[1]) + arm_m * math.sin(yaw)
-                return float(c[0]), float(c[1]), yaw, fx, fy
-
-            pred0 = _pred_drop()
-            if pred0 is not None and self._drop_inside_pad(
-                pred0[3], pred0[4], zx, zy, from_west=from_west
-            ):
-                self._pub_status(
-                    f"PLACE_READY 落点已在区内 "
-                    f"({pred0[3]:.2f},{pred0[4]:.2f}) → 直接放"
+            # 朝向已经对着区，才沿车头短走一段。已经在区内就停，不再顶出区。
+            c1 = self.motion.get_base_xy_yaw_map()
+            if c1 is not None:
+                bx, by, yaw = float(c1[0]), float(c1[1]), float(c1[2])
+                yaw_err = abs(self.motion._wrap_pi(pyaw - yaw))
+                fx = bx + arm_m * math.cos(yaw)
+                fy = by + arm_m * math.sin(yaw)
+                ex_b = math.cos(yaw) * (float(zx) - fx) + math.sin(yaw) * (
+                    float(zy) - fy
                 )
-                self.motion.stop_chassis()
-                return
-
-            # 导航已经停在区前：不再二次 Navigate、不再原地拧圈。
-            # 只在落点还在区外时，朝区心轻轻挪，一进区就停。
-            self._pub_status("PLACE_NUDGE 落点在区外 → 轻挪进区")
-            t0 = time.time()
-            while time.time() - t0 < 2.8:
-                pred = _pred_drop()
-                if pred is None:
-                    break
-                _bx, _by, yaw, fx, fy = pred
-                if self._drop_inside_pad(
-                    fx, fy, zx, zy, from_west=from_west
-                ):
-                    break
-                face = math.atan2(float(zy) - _by, float(zx) - _bx)
-                rem = self.motion._wrap_pi(face - yaw)
-                # 朝向差大就几乎不走，小角速度跟；差小就直行，避免转过
-                if abs(rem) > 0.45:
-                    vx, wz = 0.0, max(-0.16, min(0.16, 0.45 * rem))
-                else:
-                    vx = 0.12
-                    wz = max(-0.10, min(0.10, 0.35 * rem))
-                self.motion.publish_cmd_vel(float(vx), float(wz))
-                time.sleep(0.05)
-            self.motion.stop_chassis()
-
-            pred = _pred_drop()
-            ok = False
-            if pred is not None:
-                _bx, _by, _yaw, fx, fy = pred
-                ok = self._drop_inside_pad(
+                inside = self._drop_inside_pad(
                     fx, fy, zx, zy, from_west=from_west
                 )
-                self._pub_status(
-                    f"PLACE_DOCK_OK in_pad={'Y' if ok else 'N'} "
-                    f"dx={fx - zx:+.2f} dy={fy - zy:+.2f} "
-                    f"预测=({fx:.2f},{fy:.2f})"
-                )
-            if not ok:
-                self._pub_status(
-                    "PLACE_APPROX 未严格进区心，区左右也直接放"
+                if (not inside) and yaw_err <= 0.30 and ex_b > 0.04:
+                    crawl = min(0.18, float(ex_b))
+                    self._pub_status(f"PLACE_CRAWL +{crawl:.2f}m 沿车头进区")
+                    self.motion.drive_openloop_distance(
+                        crawl, vx=0.12, timeout=1.6
+                    )
+                    self.motion.stop_chassis()
+                c3 = self.motion.get_base_xy_yaw_map()
+                if c3 is not None:
+                    yaw3 = float(c3[2])
+                    fx3 = float(c3[0]) + arm_m * math.cos(yaw3)
+                    fy3 = float(c3[1]) + arm_m * math.sin(yaw3)
+                    ok = self._drop_inside_pad(
+                        fx3, fy3, zx, zy, from_west=from_west
+                    )
+                    self._pub_status(
+                        f"PLACE_DOCK_OK in_pad={'Y' if ok else 'N'} "
+                        f"dx={fx3-zx:+.2f}(长) dy={fy3-zy:+.2f}(短) "
+                        f"预测=({fx3:.2f},{fy3:.2f})"
+                    )
+
+            # 4) 绿垫视觉微调：转身正对后再判像素中心（最后1m，马上放之前）
+            if bool(self.get_parameter("place_vision_enable").value):
+                self._place_vision_center_pad(
+                    zx, zy, arm_m=arm_m, from_west=from_west
                 )
         finally:
+            self._stop_place_vision_preview()
             self.motion.stop_chassis()
             self.motion.exit_local_mode()
 
+    def _start_place_vision_preview(
+        self,
+        zx: float,
+        zy: float,
+        arm_m: float,
+        tx: float,
+        ty: float,
+        park_m: float,
+        from_east: bool = False,
+    ) -> None:
+        """On the way to the zone, sample the pad and predict the drop. No cmd_vel."""
+        self._stop_place_vision_preview()
+        self._place_vis_sample = None
+        self._place_vis_ahead = None
+        so = max(0.15, float(park_m))
+        if from_east:
+            gx, gy, face = float(tx) + so, float(ty), math.pi
+        else:
+            cur = self.motion.get_base_xy_yaw_map()
+            rx = float(cur[0]) if cur is not None else float(tx) - 1.0
+            cands = [
+                (float(tx) - so, float(ty), 0.0),
+                (float(tx) + so, float(ty), math.pi),
+            ]
+            gx, gy, face = min(
+                cands, key=lambda p: (p[0] - rx) ** 2 + (p[1] - float(ty)) ** 2
+            )
+        self._place_vis_zone = (
+            float(zx),
+            float(zy),
+            float(arm_m),
+            float(gx),
+            float(gy),
+            float(face),
+        )
+        self._place_vis_stop = threading.Event()
+        self._place_vis_thread = threading.Thread(
+            target=self._place_vision_preview_loop,
+            name="place_vision_preview",
+            daemon=True,
+        )
+        self._place_vis_thread.start()
+        self._pub_status("PLACE_VISION_PREVIEW 路上算绿垫和落点，不控车")
+
+    def _stop_place_vision_preview(self) -> None:
+        ev = self._place_vis_stop
+        th = self._place_vis_thread
+        if ev is not None:
+            ev.set()
+        if (
+            th is not None
+            and th.is_alive()
+            and threading.current_thread() is not th
+        ):
+            th.join(timeout=0.5)
+        self._place_vis_thread = None
+
+    def _place_vision_preview_loop(self) -> None:
+        target_cy = float(self.get_parameter("place_vision_target_cy").value)
+        vision_on = bool(self.get_parameter("place_vision_enable").value)
+        stop = self._place_vis_stop
+        while stop is not None and not stop.is_set():
+            if vision_on:
+                bgr = self.motion.grab_front_bgr()
+                pad = detect_green_pad(bgr) if bgr is not None else None
+                if pad is not None:
+                    cy_frac = float(pad.cy) / float(max(pad.image_h, 1))
+                    sample = {
+                        "t": time.time(),
+                        "err_u": float(pad.err_u),
+                        "cy_frac": cy_frac,
+                        "frac": blob_area_frac(pad),
+                        "centered": green_pad_centered(
+                            pad,
+                            max_err_u=0.12,
+                            target_cy_frac=target_cy,
+                            max_err_v=0.18,
+                            min_area_frac=0.018,
+                        ),
+                    }
+                    with self._place_vis_lock:
+                        self._place_vis_sample = sample
+            if stop.wait(0.08):
+                break
+            try:
+                self._note_place_landing_ahead()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _note_place_landing_ahead(self) -> None:
+        """About 4s before the park, predict the drop. No cmd_vel."""
+        zone = self._place_vis_zone
+        if zone is None or self._place_vis_ahead is not None:
+            return
+        cur = self.motion.get_base_xy_yaw_map()
+        if cur is None:
+            return
+        zx, zy, arm_m, gx, gy, face = zone
+        rx, ry = float(cur[0]), float(cur[1])
+        dist = math.hypot(rx - gx, ry - gy)
+        # 约 0.40m/s，离停靠点 1.6m 大约还要 4 秒。只记一次，不控车。
+        if dist > 1.60:
+            return
+        land_x = float(gx) + float(arm_m) * math.cos(float(face))
+        land_y = float(gy) + float(arm_m) * math.sin(float(face))
+        from_west = float(gx) < float(zx)
+        in_pad = self._drop_inside_pad(
+            land_x, land_y, zx, zy, from_west=from_west
+        )
+        self._place_vis_ahead = {
+            "land_x": land_x,
+            "land_y": land_y,
+            "in_pad": in_pad,
+            "dist": dist,
+        }
+        self._pub_status(
+            f"PLACE_AHEAD_4S 落点=({land_x:.2f},{land_y:.2f}) "
+            f"区心=({zx:.2f},{zy:.2f}) 在区内={'Y' if in_pad else 'N'} "
+            f"d={dist:.2f}m 不控车"
+        )
+
+    def _place_vision_center_pad(
+        self,
+        zx: float,
+        zy: float,
+        *,
+        arm_m: float,
+        from_west: bool,
+    ) -> None:
+        """Use the pad sample computed on the way in. Does not command the base."""
+        del zx, zy, arm_m, from_west
+        self._stop_place_vision_preview()
+        with self._place_vis_lock:
+            sample = self._place_vis_sample
+        if sample is None:
+            bgr = self.motion.grab_front_bgr()
+            pad = detect_green_pad(bgr) if bgr is not None else None
+            if pad is not None:
+                target_cy = float(self.get_parameter("place_vision_target_cy").value)
+                cy_frac = float(pad.cy) / float(max(pad.image_h, 1))
+                sample = {
+                    "t": time.time(),
+                    "err_u": float(pad.err_u),
+                    "cy_frac": cy_frac,
+                    "frac": blob_area_frac(pad),
+                    "centered": green_pad_centered(
+                        pad,
+                        max_err_u=0.12,
+                        target_cy_frac=target_cy,
+                        max_err_v=0.18,
+                        min_area_frac=0.018,
+                    ),
+                }
+        if sample is None:
+            self._pub_status("PLACE_VISION_MISS 途中未看到绿垫 → 直接放")
+            return
+        age = max(0.0, time.time() - float(sample["t"]))
+        self._pub_status(
+            f"PLACE_VISION_READY u={float(sample['err_u']):+.2f} "
+            f"cy={float(sample['cy_frac']):.2f} frac={float(sample['frac']):.3f} "
+            f"centered={'Y' if sample['centered'] else 'N'} age={age:.2f}s → 直接放"
+        )
 
     def _leave_zone_after_place(self, zx: float, zy: float) -> None:
         """Straight reverse only — clear the pad so next approach won't crush cubes."""

@@ -1,16 +1,14 @@
 """Official exam binary → /exam_question.
 
-默认：终端里按【空格】才出题（可多次）。
-调试自动出题：ros2 run yzbot_task exam_feeder --ros-args -p auto_once:=true
+终端打开后自己输入参数再回车。
+比赛模式参数 11470507：题目按 30 分钟一档，同一档内不变。
+直接回车：练习模式，每次随机一题。
 """
 
 from __future__ import annotations
 
 import os
-import select
 import sys
-import termios
-import tty
 import subprocess
 from pathlib import Path
 
@@ -27,33 +25,18 @@ _DEFAULT_BIN = str(
     / "TMSCQtest_x86_x64.bin"
 )
 
+_CONTEST_ARG = "11470507"
+
 
 class ExamFeederNode(Node):
     def __init__(self):
         super().__init__("exam_feeder")
         self.declare_parameter("exam_bin", _DEFAULT_BIN)
-        # False = 按空格出题；True = 启动后自动出一题（调试用）
-        self.declare_parameter("auto_once", False)
-        self.declare_parameter("delay_sec", 1.0)
 
         self.pub = self.create_publisher(String, "/exam_question", 10)
         self.status_pub = self.create_publisher(String, "/task_status", 10)
-        self._auto_fired = False
 
-        if bool(self.get_parameter("auto_once").value):
-            delay = float(self.get_parameter("delay_sec").value)
-            self.create_timer(max(0.2, delay), self._auto_once_cb)
-            self.get_logger().info("exam_feeder: auto_once=true，将自动出一题")
-        else:
-            self.get_logger().info("exam_feeder: 按【空格】出题（可多次）")
-
-    def _auto_once_cb(self):
-        if self._auto_fired:
-            return
-        self._auto_fired = True
-        self.feed_once()
-
-    def feed_once(self) -> bool:
+    def feed_once(self, exam_arg: str = "") -> bool:
         bin_path = str(self.get_parameter("exam_bin").value)
         if not os.path.isfile(bin_path):
             self.get_logger().error(f"exam_bin not found: {bin_path}")
@@ -62,9 +45,13 @@ class ExamFeederNode(Node):
             os.chmod(bin_path, 0o755)
         except OSError:
             pass
+        cmd = [bin_path]
+        arg = str(exam_arg).strip()
+        if arg:
+            cmd.append(arg)
         try:
             proc = subprocess.run(
-                [bin_path],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=10.0,
@@ -76,82 +63,66 @@ class ExamFeederNode(Node):
         text = (proc.stdout or "").strip()
         if not text:
             text = (proc.stderr or "").strip()
-        if not text:
+        if text:
+            print(text)
+            print()
+        line = _question_line(text)
+        if not line:
             self.get_logger().error("exam_bin produced empty output")
             return False
-        line = next((ln.strip() for ln in text.splitlines() if ln.strip()), text)
         msg = String()
         msg.data = line
         self.pub.publish(msg)
         st = String()
         st.data = f"EXAM_Q: {line[:160]}"
         self.status_pub.publish(st)
-        self.get_logger().info(f"published /exam_question: {line[:120]}...")
+        mode = "比赛" if arg == _CONTEST_ARG else "练习"
+        self.get_logger().info(f"published /exam_question ({mode}): {line[:120]}...")
         return True
 
 
-def _wait_space() -> bool:
-    """Block until Space (or Enter). Return False on Ctrl+C / EOF."""
-    fd = sys.stdin.fileno()
-    if not os.isatty(fd):
-        # 非交互：读一行
-        try:
-            line = sys.stdin.readline()
-        except Exception:
-            return False
-        return bool(line)
+def _question_line(text: str) -> str:
+    """Keep the 题目 line. Contest mode also prints a seed header."""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    for ln in lines:
+        if ln.startswith("题目"):
+            return ln
+    for ln in lines:
+        if ln.startswith("使用种子") or set(ln) <= {"-"}:
+            continue
+        return ln
+    return ""
 
-    old = termios.tcgetattr(fd)
+
+def _read_exam_arg() -> str:
+    print()
+    print("========================================")
+    print("  出题终端")
+    print(f"  比赛模式：输入 {_CONTEST_ARG} 后回车")
+    print("            （题目每 30 分钟变更一次）")
+    print("  练习模式：直接回车，随机一题")
+    print("========================================")
     try:
-        tty.setcbreak(fd)
-        while True:
-            r, _, _ = select.select([fd], [], [], 0.25)
-            if not r:
-                continue
-            ch = os.read(fd, 1)
-            if not ch:
-                return False
-            # Space or Enter
-            if ch in (b" ", b"\r", b"\n"):
-                return True
-            # Ctrl+C
-            if ch == b"\x03":
-                return False
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        return input("参数: ").strip()
+    except EOFError:
+        return ""
 
 
 def main(args=None):
     rclpy.init(args=args)
     node = ExamFeederNode()
-    auto = bool(node.get_parameter("auto_once").value)
     try:
-        if auto:
-            for _ in range(50):
-                rclpy.spin_once(node, timeout_sec=0.1)
-                if node._auto_fired:
-                    rclpy.spin_once(node, timeout_sec=0.2)
-                    rclpy.spin_once(node, timeout_sec=0.2)
-                    break
+        exam_arg = _read_exam_arg()
+        if exam_arg == _CONTEST_ARG:
+            print("→ 比赛模式出题 …")
+        elif exam_arg:
+            print(f"→ 使用参数 {exam_arg} 出题 …")
         else:
-            print()
-            print("========================================")
-            print("  出题终端：按【空格】出一题（可多次）")
-            print("  Ctrl+C 退出")
-            print("========================================")
-            print()
-            while rclpy.ok():
-                # 让 ROS 回调有机会跑
-                rclpy.spin_once(node, timeout_sec=0.05)
-                sys.stdout.write("\r等待空格出题 …  ")
-                sys.stdout.flush()
-                if not _wait_space():
-                    break
-                print("\n→ 正在出题 …")
-                ok = node.feed_once()
-                for _ in range(5):
-                    rclpy.spin_once(node, timeout_sec=0.1)
-                print("→ 出题完成\n" if ok else "→ 出题失败\n")
+            print("→ 练习模式出题 …")
+        ok = node.feed_once(exam_arg)
+        for _ in range(8):
+            rclpy.spin_once(node, timeout_sec=0.1)
+        print("→ 出题完成" if ok else "→ 出题失败")
     except KeyboardInterrupt:
         print("\n已退出出题")
     finally:

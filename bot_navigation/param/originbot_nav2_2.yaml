@@ -100,12 +100,12 @@ controller_server:
       # 倒车限幅：过大容易在墙边倒着撞
       min_vel_x: -0.55
       min_vel_y: 0.0
-      max_vel_x: 3.0
+      max_vel_x: 2.7
       max_vel_y: 0.0
-      # 墙边/杆端转弯需要够用的角速度，过低会原地卡死
-      max_vel_theta: 0.90
+      # 墙边/杆端转弯需要够用的角速度，只比原来略低
+      max_vel_theta: 0.80
       min_speed_xy: 0.0
-      max_speed_xy: 3.0
+      max_speed_xy: 2.7
       min_speed_theta: 0.0
       acc_lim_x: 2.4
       acc_lim_y: 0.0
@@ -340,7 +340,7 @@ behavior_server:
     robot_base_frame: base_footprint
     transform_tolerance: 0.2
     simulate_ahead_time: 1.5
-    max_rotational_vel: 0.90
+    max_rotational_vel: 0.80
     min_rotational_vel: 0.10
     rotational_acc_lim: 1.2
 
@@ -363,8 +363,8 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [3.0, 0.0, 0.55]
-    min_velocity: [-0.55, 0.0, -0.90]
+    max_velocity: [2.7, 0.0, 0.50]
+    min_velocity: [-0.55, 0.0, -0.80]
     max_accel: [2.2, 0.0, 0.50]
     max_decel: [-2.2, 0.0, -0.50]
     odom_topic: "odometry/filtered"

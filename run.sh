@@ -13,7 +13,7 @@ if [[ ! -f "${WS}/install/setup.bash" ]]; then
 fi
 
 SHOW_ELAPSED="${SHOW_ELAPSED:-true}"
-# 出题终端默认开启；需在该终端按【空格】才出题
+# 出题终端默认开启；打开后自己输入参数（比赛模式 11470507）
 RUN_EXAM="${RUN_EXAM:-true}"
 # official=官方2题bin；practice=多套练习库(feed)；robot=直接发task_command测路径
 EXAM_BANK="${EXAM_BANK:-official}"
@@ -51,7 +51,7 @@ echo " yzbot 一键启动 (./run.sh)"
 echo " 工作空间: ${WS}"
 echo " 说明: 已避开 conda，使用 /usr/bin/python3"
 echo " 总用时显示: ${SHOW_ELAPSED}  (正式赛: SHOW_ELAPSED=false ./run.sh)"
-echo " 出题终端: ${RUN_EXAM}  (在 6-Exam 终端按【空格】出题)"
+echo " 出题终端: ${RUN_EXAM}  (在 6-Exam 输入参数回车，比赛模式 11470507)"
 echo "=========================================="
 
 # 本脚本自身先检查系统 python（勿在 set -u 下 source ROS setup）
@@ -84,7 +84,7 @@ echo "等待 task_sm …"; sleep 3
 open_tab "5-LLM" "ros2 run yzbot_task llm_solver"
 echo "等待 llm_solver …"; sleep 3
 
-# ⑥ 出题：等栈起来后开终端，按空格才出题
+# ⑥ 出题：等栈起来后开终端，自己输入参数
 if [[ "${RUN_EXAM}" == "true" ]]; then
   case "${EXAM_BANK}" in
     practice|bank|multi)
@@ -94,7 +94,7 @@ if [[ "${RUN_EXAM}" == "true" ]]; then
       open_tab "6-Exam" "ros2 run yzbot_task practice_exam --ros-args -p mode:=robot"
       ;;
     *)
-      open_tab "6-Exam" "ros2 run yzbot_task exam_feeder --ros-args -p auto_once:=false"
+      open_tab "6-Exam" "ros2 run yzbot_task exam_feeder"
       ;;
   esac
 fi
@@ -112,7 +112,7 @@ echo "已启动各终端。接下来："
 echo "  1) 定位已用 Gazebo 真值（gt_localization），一般不用再点 2D Pose Estimate"
 echo "  2) coStudio → 打开连接 → ws://127.0.0.1:21274"
 echo "  3) 导入布局：${COSTUDIO_LAYOUT}"
-echo "  4) 切到「6-Exam」终端，按【空格】出题"
+echo "  4) 切到「6-Exam」终端，输入出题参数后回车（比赛模式 11470507）"
 echo "     多套练习：EXAM_BANK=practice ./run.sh"
 echo "     只测取放路径：EXAM_BANK=robot ./run.sh"
 echo "     只验解题：ros2 run yzbot_task practice_exam --ros-args -p mode:=check -p backend:=local"

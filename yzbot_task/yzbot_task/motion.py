@@ -530,6 +530,7 @@ class MotionHelpers:
         timeout: float = 120.0,
         approach_standoff: float = 0.38,
         from_east: bool = False,
+        goal_yaw: Optional[float] = None,
     ) -> bool:
         """Nav to a point ~PLACE_FRONT_M behind drop (arm EE ≈ 0.38m ahead).
 
@@ -550,11 +551,13 @@ class MotionHelpers:
             gx, gy, yaw = min(
                 cands, key=lambda p: (p[0] - rx) ** 2 + (p[1] - float(y)) ** 2
             )
+        if goal_yaw is not None:
+            yaw = float(goal_yaw)
         self.node.get_logger().info(
             f"NAV_PLACE zone=({x:.2f},{y:.2f}) park=({gx:.2f},{gy:.2f}) "
             f"behind={so:.2f}m yaw={yaw:.2f} (区心在车前，不压区心)"
         )
-        # 位置到了就停，不在区前把朝向拧死（容易转过）
+        # 位置到了就停。继续追朝向会在区前边走边拧，拧过再拧回来。
         soft_early = max(0.22, float(xy_tol))
         old_yaw_tol = self._set_follow_yaw_tol(0.90)
         try:
@@ -564,7 +567,6 @@ class MotionHelpers:
                 yaw,
                 timeout=timeout,
                 early_xy_tol=soft_early,
-                early_yaw_tol=0.90,
             )
         finally:
             if old_yaw_tol is not None:
@@ -577,13 +579,14 @@ class MotionHelpers:
             if cur_n is not None
             else 99.0
         )
-        if (not ok) or dxy > soft_early * 1.4:
+        # 差得远才再补一次位置，不在区前追朝向。
+        if dxy > 0.55:
             ok2 = self.navigate(
                 float(gx),
                 float(gy),
                 yaw,
                 timeout=min(40.0, timeout),
-                early_xy_tol=soft_early * 1.15,
+                early_xy_tol=0.28,
             )
             time.sleep(0.04)
             self.stop_chassis()
@@ -1112,8 +1115,13 @@ class MotionHelpers:
             self.node.get_logger().warn("cmd_vel blocked: not MODE_LOCAL")
             return False
         tw = Twist()
-        tw.linear.x = float(vx)
-        tw.angular.z = float(wz)
+        vx_cmd = float(vx)
+        wz_cmd = float(wz)
+        # 直行不变。边走边转时前进略慢，避免拧着冲过去。
+        if abs(vx_cmd) > 0.02 and abs(wz_cmd) > 0.04:
+            vx_cmd *= 0.90
+        tw.linear.x = vx_cmd
+        tw.angular.z = wz_cmd
         self.cmd_vel_pub.publish(tw)
         return True
 

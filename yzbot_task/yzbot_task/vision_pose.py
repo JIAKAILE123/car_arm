@@ -455,10 +455,10 @@ def approach_xy_for_cube(
         ax, ay = float(cx) - so_r, float(cy)
         return ax, ay, _face(ax, ay)
 
-    # red#3：西停朝东，第一次停车正对块
+    # red#3：停在物块 +Y 0.75m（同 x），车头朝南正对块，然后交视觉。
+    # 南侧 y≈-4.4 有墙，不往 -Y 停。
     if cid == 3:
-        so3 = max(so_r, 0.58)
-        ax, ay = float(cx) - so3, float(cy)
+        ax, ay = float(cx), float(cy) + 0.75
         return ax, ay, _face(ax, ay)
 
     # red#4：东停朝西，第一次就对块

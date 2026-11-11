@@ -274,7 +274,7 @@
     },
     "Publish!20rffgt": {
       "buttonText": "提交题目→大模型解题",
-      "buttonTooltip": "只改引号里的中文题干，外面 { \"data\": \"...\" } 不要删。点提交 → /exam_question。空格出题用 6-Exam 终端。",
+      "buttonTooltip": "只改引号里的中文题干，外面 { \"data\": \"...\" } 不要删。点提交 → /exam_question。官方出题在 6-Exam 终端输入参数（比赛模式 11470507）。",
       "advancedView": true,
       "value": "{\n  \"data\": \"5个红色物块，去A区\"\n}",
       "foxglovePanelTitle": "②粘贴题目解题（只改引号内文字）",
