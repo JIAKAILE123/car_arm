@@ -1131,7 +1131,9 @@ class TaskStateMachine(Node):
         red3_soft = str(color).lower() == "red" and int(cid) == 3
         red2 = str(color).lower() == "red" and int(cid) == 2
         yaw_tol = 0.45
-        early_yaw = 0.45 if (red3_soft or red2) else 0.55
+        # Nav2 只负责开到位置，不负责朝向（它的 yaw 容差 0.80，会转过头再回摆）。
+        # 位置一到就放手，由 snap_yaw_map 闭环转到 yaw_tol=0.25，再交给视觉。
+        early_yaw = 0.60
         # All blue + all red: never drive across/over the cube (protects AMCL)
         use_safe = str(color).lower() in ("blue", "red")
         if use_safe:
@@ -1182,17 +1184,15 @@ class TaskStateMachine(Node):
                 and int(cid) == 5
             ):
                 cur = self.motion.get_base_xy_yaw_map()
-                if cur is not None and self._on_c_room_side(cur[0], cur[1]):
+                from_c_room = cur is not None and self._on_c_room_side(
+                    cur[0], cur[1]
+                )
+                if from_c_room:
                     if not self._cross_c_door(cur):
                         return False
-                lead_x = float(ax) + 1.05
-                cur = self.motion.get_base_xy_yaw_map()
-                already_on_east_approach = (
-                    cur is not None
-                    and ax + 0.40 <= cur[0] <= lead_x + 0.45
-                    and abs(cur[1] - ay) <= 0.40
-                )
-                if not already_on_east_approach:
+                    # 只有刚出 C 门时才需要先绕到东侧；其它位置直接交给全局
+                    # 规划，否则会多出一个导航点，到点还要拧 90° 再去第二个点。
+                    lead_x = float(ax) + 1.05
                     self._pub_status(
                         f"BLUE5_EAST ({lead_x:.2f},{ay:.2f}) → ({ax:.2f},{ay:.2f})"
                     )
@@ -1211,12 +1211,12 @@ class TaskStateMachine(Node):
                     ayaw,
                     retries=retries,
                     xy_tol=xy_tol,
-                    yaw_tol=yaw_tol,
+                    yaw_tol=0.25,
                     settle_sec=0.04,
                     reanchor=True,
                     stay_if_xy=max(0.30, xy_tol * 1.4),
                     early_yaw_tol=early_yaw,
-                    snap_yaw=False,
+                    snap_yaw=True,
                 )
             if not nav_ok:
                 cur = self.motion.get_base_xy_yaw_map()
@@ -1260,12 +1260,12 @@ class TaskStateMachine(Node):
                 ayaw,
                 retries=retries,
                 xy_tol=xy_tol,
-                yaw_tol=yaw_tol,
+                yaw_tol=0.25,
                 settle_sec=0.04,
                 reanchor=True,
                 stay_if_xy=max(0.30, xy_tol * 1.4),
                 early_yaw_tol=early_yaw,
-                snap_yaw=False,
+                snap_yaw=True,
             )
             if not nav_ok:
                 cur = self.motion.get_base_xy_yaw_map()
