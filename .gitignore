@@ -26,7 +26,7 @@ __pycache__/
 **/deepseek_api_key
 **/secrets/
 
-# 本地回滚备份 / 预编译二进制
+# 本地回滚备份 / 预编译二进制 / 源码临时备份
 _backups/
 third_party/
 *.bak*

@@ -1,7 +1,9 @@
 #!/usr/bin/python3
 
 import os
+from pathlib import Path
 
+from ament_index_python.packages import get_package_prefix
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -10,6 +12,20 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from nav2_common.launch import ReplaceString
+
+
+def _guard_available() -> bool:
+    """dyn_obs_guard only exists after `colcon build` (console_scripts entry).
+
+    Referencing a missing executable makes launch abort the WHOLE bringup
+    (map_server, gt_localization, ...), which is why the coStudio map went
+    blank. Probe first and degrade to the old speed chain instead.
+    """
+    try:
+        prefix = Path(get_package_prefix("yzbot_task"))
+        return (prefix / "lib" / "yzbot_task" / "dyn_obs_guard").is_file()
+    except Exception:
+        return False
 
 
 def generate_launch_description():
@@ -33,6 +49,7 @@ def generate_launch_description():
     slam = LaunchConfiguration('slam', default='False')
     # 包内 RViz：与原版一致，仅关掉 LaserScan 红点；地图/膨胀等全开
     rviz_config_dir = os.path.join(navigation2_dir, 'rviz', 'nav2_default_view.rviz')
+
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -78,7 +95,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_sim_time': use_sim_time,
-                'horizon_sec': 2.2,
+                'horizon_sec': 2.6,
                 'dt_sec': 0.20,
                 'rate_hz': 10.0,
             }],

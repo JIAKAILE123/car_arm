@@ -30,6 +30,7 @@ setup(
             "task_sm = yzbot_task.task_sm:main",
             "arm_js_filter = yzbot_task.arm_js_filter:main",
             "dyn_obs_predict = yzbot_task.dyn_obs_predict:main",
+            "dyn_obs_guard = yzbot_task.dyn_obs_guard:main",
             "gt_localization = yzbot_task.gt_localization:main",
             "route_planner = yzbot_task.route_planner:main",
         ],
