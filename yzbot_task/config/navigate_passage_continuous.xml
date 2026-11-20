@@ -1,0 +1,21 @@
+<!-- The midpoint is removed as soon as the robot crosses it, independently of replanning. -->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="2" name="PassageRecovery">
+      <PipelineSequence name="ContinuousPassage">
+        <!-- Back to 0.43 on purpose. 0.24 sounded "safer" but made it worse:
+             the base only gets within ~0.35 m when the planner skirts the
+             doorway, so the point was never removed, every replan still aimed
+             at it, and the base drove back and forth through the same spot.
+             The task layer now drops already-passed points by progress along
+             the path, so a generous radius here is fine. -->
+        <RemovePassedGoals input_goals="{goals}" output_goals="{goals}" radius="0.43"/>
+        <RateController hz="0.5">
+          <ComputePathThroughPoses goals="{goals}" path="{path}" planner_id="GridBased"/>
+        </RateController>
+        <FollowPath path="{path}" controller_id="FollowPath"/>
+      </PipelineSequence>
+      <Wait wait_duration="1.0"/>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

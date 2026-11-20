@@ -1,5 +1,7 @@
 <sdf version='1.7'>
   <world name='my_world'>
+    <!-- In-sim dyn obs motion (no ROS/gz CLI). Needs libdyn_obs_mover.so on GAZEBO_PLUGIN_PATH -->
+    <plugin name='dyn_obs_mover' filename='libdyn_obs_mover.so'/>
     <model name='ground_plane'>
       <static>1</static>
       <link name='link'>
@@ -1577,50 +1579,50 @@
         </link>
       </model>
       <model name='blue_cube_1'>
-      <pose>-6.18 5.5 0.015 0 -0 0</pose>
+      <pose>0.60 -2.20 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>-6.18 5.5 0.015 0 -0 0</pose>
+          <pose>0.60 -2.20 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
         </link>
       </model>
       <model name='blue_cube_2'>
-      <pose>-8.21 -5.21 0.015 0 -0 0</pose>
+      <pose>-0.60 1.90 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>-8.21 -5.21 0.015 0 -0 0</pose>
+          <pose>-0.60 1.90 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
         </link>
       </model>
       <model name='blue_cube_3'>
-      <pose>-7.08 2.35 0.015 0 -0 0</pose>
+      <pose>6.20 -2.60 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>-7.08 2.35 0.015 0 -0 0</pose>
+          <pose>6.20 -2.60 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
         </link>
       </model>
       <model name='blue_cube_4'>
-      <pose>-5.77 -5.28 0.015 0 -0 0</pose>
+      <pose>-7.70 -3.00 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>-5.77 -5.28 0.015 0 -0 0</pose>
+          <pose>-7.70 -3.00 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
         </link>
       </model>
       <model name='blue_cube_5'>
-      <pose>-4.51 4.14 0.015 0 -0 0</pose>
+      <pose>-0.60 -8.30 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>-4.51 4.14 0.015 0 -0 0</pose>
+          <pose>-0.60 -8.30 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
@@ -1827,152 +1829,152 @@
         </link>
       </model>
       <model name='red_cube_1'>
-      <pose>-6.89 -2.8 0.015 0 -0 0</pose>
+      <pose>0.80 0.20 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>-6.89 -2.8 0.015 0 -0 0</pose>
+          <pose>0.80 0.20 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
         </link>
       </model>
       <model name='red_cube_2'>
-      <pose>-2.89 -5.85 0.015 0 -0 0</pose>
+      <pose>-5.20 0.00 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>-2.89 -5.85 0.015 0 -0 0</pose>
+          <pose>-5.20 0.00 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
         </link>
       </model>
       <model name='red_cube_3'>
-      <pose>-2.02 -4.50 0.015 0 -0 0</pose>
+      <pose>-1.00 -3.80 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>-2.02 -4.50 0.015 0 -0 0</pose>
+          <pose>-1.00 -3.80 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
         </link>
       </model>
       <model name='red_cube_4'>
-      <pose>-2.77 5.8 0.015 0 -0 0</pose>
+      <pose>1.40 -4.60 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>-2.77 5.8 0.015 0 -0 0</pose>
+          <pose>1.40 -4.60 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
         </link>
       </model>
       <model name='red_cube_5'>
-      <pose>-2.08 3.66 0.015 0 -0 0</pose>
+      <pose>-5.20 -7.10 0.015 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
-          <pose>-2.08 3.66 0.015 0 -0 0</pose>
+          <pose>-5.20 -7.10 0.015 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>-1.1e-05 -1.1e-05 -2.2e-05 0.000735 -0.000735 0</acceleration>
           <wrench>-0 -0 -0 0 -0 0</wrench>
         </link>
       </model>
       <model name='zone_a'>
-        <pose>5 -11 0.01 0 -0 0</pose>
+        <pose>4.20 -1.80 0.01 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='base'>
-          <pose>5 -11 0.01 0 -0 0</pose>
+          <pose>4.20 -1.80 0.01 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_A_1'>
-          <pose>4.9 -11 0.23 0 0.4 0</pose>
+          <pose>4.10 -1.80 0.22 0 0.4 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_A_2'>
-          <pose>5.1 -11 0.23 0 -0.4 0</pose>
+          <pose>4.30 -1.80 0.22 0 -0.4 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_A_3'>
-          <pose>5 -11 0.26 0 -0 0</pose>
+          <pose>4.20 -1.80 0.25 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
       </model>
       <model name='zone_b'>
-        <pose>5 -12 0.01 0 -0 0</pose>
+        <pose>0.60 -3.40 0.01 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='base'>
-          <pose>5 -12 0.01 0 -0 0</pose>
+          <pose>0.60 -3.40 0.01 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_B_bottom_horizontal'>
-          <pose>5.05 -12 0.03 0 -0 0</pose>
+          <pose>0.65 -3.40 0.01 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_B_bottom_vertical_stroke'>
-          <pose>5.15 -12 0.12 0 -0 0</pose>
+          <pose>0.75 -3.40 0.11 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_B_middle_horizontal'>
-          <pose>5.05 -12 0.21 0 -0 0</pose>
+          <pose>0.65 -3.40 0.20 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_B_top_horizontal'>
-          <pose>5.05 -12 0.39 0 -0 0</pose>
+          <pose>0.65 -3.40 0.38 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_B_top_vertical_stroke'>
-          <pose>5.15 -12 0.3 0 -0 0</pose>
+          <pose>0.75 -3.40 0.29 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_B_vertical_stroke'>
-          <pose>4.9 -12 0.21 0 -0 0</pose>
+          <pose>0.50 -3.40 0.20 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
       </model>
       <model name='zone_c'>
-        <pose>5 -13 0.01 0 -0 0</pose>
+        <pose>-6.00 -2.90 0.01 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='base'>
-          <pose>5 -13 0.01 0 -0 0</pose>
+          <pose>-6.00 -2.90 0.01 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_C_1'>
-          <pose>4.95 -13 0.39 0 -0 0</pose>
+          <pose>-6.05 -2.90 0.38 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_C_2'>
-          <pose>4.95 -13 0.03 0 -0 0</pose>
+          <pose>-6.05 -2.90 0.01 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
         </link>
         <link name='letter_C_3'>
-          <pose>4.82 -13 0.21 0 -0 0</pose>
+          <pose>-6.18 -2.90 0.20 0 -0 0</pose>
           <velocity>0 0 0 0 -0 0</velocity>
           <acceleration>0 0 0 0 -0 0</acceleration>
           <wrench>0 0 0 0 -0 0</wrench>
@@ -1983,10 +1985,10 @@
       </light>
     </state>
     <model name='red_cube_1'>
-      <pose>-6.89 -2.8 0.015 0 -0 0</pose>
+      <pose>0.80 0.20 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>0.15</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2007,17 +2009,22 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2042,10 +2049,10 @@
       </link>
     </model>
     <model name='red_cube_2'>
-      <pose>-2.89 -5.85 0.015 0 -0 0</pose>
+      <pose>-5.20 0.00 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>0.15</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2066,17 +2073,22 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2101,10 +2113,10 @@
       </link>
     </model>
     <model name='red_cube_3'>
-      <pose>-2.02 -4.50 0.015 0 -0 0</pose>
+      <pose>-1.00 -3.80 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>0.15</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2125,17 +2137,22 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2160,10 +2177,10 @@
       </link>
     </model>
     <model name='red_cube_4'>
-      <pose>-2.77 5.8 0.015 0 -0 0</pose>
+      <pose>1.40 -4.60 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>0.15</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2184,17 +2201,22 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2219,10 +2241,10 @@
       </link>
     </model>
     <model name='red_cube_5'>
-      <pose>-2.08 3.66 0.015 0 -0 0</pose>
+      <pose>-5.20 -7.10 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>0.15</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2243,17 +2265,22 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2278,10 +2305,10 @@
       </link>
     </model>
     <model name='blue_cube_1'>
-      <pose>-6.18 5.5 0.015 0 -0 0</pose>
+      <pose>0.60 -2.20 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>0.15</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2302,17 +2329,22 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2337,10 +2369,10 @@
       </link>
     </model>
     <model name='blue_cube_2'>
-      <pose>-8.21 -5.21 0.015 0 -0 0</pose>
+      <pose>-0.60 1.90 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>0.15</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2361,17 +2393,22 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2396,10 +2433,10 @@
       </link>
     </model>
     <model name='blue_cube_3'>
-      <pose>-7.08 2.35 0.015 0 -0 0</pose>
+      <pose>6.20 -2.60 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>0.15</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2420,17 +2457,22 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2455,10 +2497,10 @@
       </link>
     </model>
     <model name='blue_cube_4'>
-      <pose>-5.77 -5.28 0.015 0 -0 0</pose>
+      <pose>-7.70 -3.00 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>0.15</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2479,17 +2521,22 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2514,10 +2561,10 @@
       </link>
     </model>
     <model name='blue_cube_5'>
-      <pose>-4.51 4.14 0.015 0 -0 0</pose>
+      <pose>-0.60 -8.30 0.015 0 -0 0</pose>
       <link name='link'>
         <inertial>
-          <mass>0.005</mass>
+          <mass>0.15</mass>
           <pose>0 0 0 0 -0 0</pose>
           <inertia>
             <ixx>1</ixx>
@@ -2538,17 +2585,22 @@
           <surface>
             <contact>
               <ode>
-                <soft_cfm>0.001</soft_cfm>
+                <soft_cfm>0.02</soft_cfm>
                 <soft_erp>0.2</soft_erp>
-                <max_vel>0.1</max_vel>
-                <min_depth>0.001</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.01</min_depth>
+                <kp>1e6</kp>
+                <kd>1</kd>
               </ode>
             </contact>
-            <bounce/>
+            <bounce>
+              <restitution_coefficient>0</restitution_coefficient>
+              <threshold>1e+06</threshold>
+            </bounce>
             <friction>
               <ode>
-                <mu>0.01</mu>
-                <mu2>0.01</mu2>
+                <mu>100</mu>
+                <mu2>100</mu2>
               </ode>
               <torsional>
                 <ode/>
@@ -2574,7 +2626,7 @@
     </model>
     <model name='zone_a'>
       <static>1</static>
-      <pose>3 1 0.01 0 -0 0</pose>
+      <pose>4.20 -1.80 0.01 0 -0 0</pose>
       <link name='base'>
         <visual name='visual'>
           <geometry>
@@ -2645,7 +2697,7 @@
     </model>
     <model name='zone_b'>
       <static>1</static>
-      <pose>3 0 0.01 0 -0 0</pose>
+      <pose>0.60 -3.40 0.01 0 -0 0</pose>
       <link name='base'>
         <visual name='visual'>
           <geometry>
@@ -2767,7 +2819,7 @@
     </model>
     <model name='zone_c'>
       <static>1</static>
-      <pose>3 -1 0.01 0 -0 0</pose>
+      <pose>-6.00 -2.90 0.01 0 -0 0</pose>
       <link name='base'>
         <visual name='visual'>
           <geometry>
@@ -4034,5 +4086,102 @@
       <allow_auto_disable>1</allow_auto_disable>
       <pose>0.968798 -5.71233 0.5 0 -0 0</pose>
     </model>
-  </world>
+
+    <!-- Dyn movers: horizontal bars (long on X), both slide along X -->
+    <model name='dyn_obs_1'>
+      <pose>-0.80 -1.35 0.20 0 0 0</pose>
+      <static>0</static>
+      <link name='link'>
+        <inertial>
+          <mass>1</mass>
+          <inertia>
+            <ixx>0.08</ixx><iyy>0.12</iyy><izz>0.12</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz>
+          </inertia>
+        </inertial>
+        <collision name='collision'>
+          <geometry><box><size>0.385 0.28 0.40</size></box></geometry>
+          <laser_retro>200</laser_retro>
+        </collision>
+        <visual name='visual'>
+          <geometry><box><size>0.385 0.28 0.40</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Purple</name>
+            </script>
+            <ambient>0.55 0.15 0.75 1</ambient>
+            <diffuse>0.65 0.20 0.90 1</diffuse>
+          </material>
+        </visual>
+        <self_collide>0</self_collide>
+        <gravity>0</gravity>
+        <kinematic>1</kinematic>
+      </link>
+    </model>
+    <model name='dyn_obs_2'>
+      <pose>0.00 -6.15 0.20 0 0 0</pose>
+      <static>0</static>
+      <link name='link'>
+        <inertial>
+          <mass>1</mass>
+          <inertia>
+            <ixx>0.08</ixx><iyy>0.12</iyy><izz>0.12</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz>
+          </inertia>
+        </inertial>
+        <collision name='collision'>
+          <geometry><box><size>0.385 0.28 0.40</size></box></geometry>
+          <laser_retro>200</laser_retro>
+        </collision>
+        <visual name='visual'>
+          <geometry><box><size>0.385 0.28 0.40</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Purple</name>
+            </script>
+            <ambient>0.55 0.15 0.75 1</ambient>
+            <diffuse>0.65 0.20 0.90 1</diffuse>
+          </material>
+        </visual>
+        <self_collide>0</self_collide>
+        <gravity>0</gravity>
+        <kinematic>1</kinematic>
+      </link>
+    </model>
+    <!-- Dyn mover 3: slides along Y at x≈-2, y∈[-2.5, 2.5]; longest edge 0.55*0.7 -->
+    <model name='dyn_obs_3'>
+      <pose>-2.00 0.00 0.20 0 0 0</pose>
+      <static>0</static>
+      <link name='link'>
+        <inertial>
+          <mass>1</mass>
+          <inertia>
+            <ixx>0.08</ixx><iyy>0.12</iyy><izz>0.12</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz>
+          </inertia>
+        </inertial>
+        <collision name='collision'>
+          <geometry><box><size>0.385 0.28 0.40</size></box></geometry>
+          <laser_retro>200</laser_retro>
+        </collision>
+        <visual name='visual'>
+          <geometry><box><size>0.385 0.28 0.40</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Purple</name>
+            </script>
+            <ambient>0.55 0.15 0.75 1</ambient>
+            <diffuse>0.65 0.20 0.90 1</diffuse>
+          </material>
+        </visual>
+        <self_collide>0</self_collide>
+        <gravity>0</gravity>
+        <kinematic>1</kinematic>
+      </link>
+    </model>
+  
+</world>
 </sdf>

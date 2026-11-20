@@ -19,3 +19,14 @@ __pycache__/
 *.bag
 *.pgm.bak
 **/COLCON_IGNORE
+
+# API secrets
+.env
+.env.*
+**/deepseek_api_key
+**/secrets/
+
+# 本地回滚备份 / 预编译二进制
+_backups/
+third_party/
+*.bak*

@@ -1,7 +1,13 @@
 import os
 import re
+from ament_index_python.packages import get_package_prefix
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, RegisterEventHandler
+from launch.actions import (
+    ExecuteProcess,
+    RegisterEventHandler,
+    SetEnvironmentVariable,
+    TimerAction,
+)
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from launch.event_handlers import OnProcessExit
@@ -24,11 +30,42 @@ def generate_launch_description():
     urdf_model_path = os.path.join(model_pkg_share, f'urdf/{urdf_name}')
     world_file_path = os.path.join(model_pkg_share, f'worlds/{world_name}')
 
-    # 启动 Gazebo（带世界文件）
+    # In-sim dyn_obs_mover plugin (.so must be on GAZEBO_PLUGIN_PATH)
+    plugin_lib = None
+    try:
+        from ament_index_python.packages import PackageNotFoundError
+        plugin_lib = os.path.join(get_package_prefix('yzbot_gazebo_plugins'), 'lib')
+    except Exception:
+        plugin_lib = None
+    if not plugin_lib or not os.path.isfile(os.path.join(plugin_lib, 'libdyn_obs_mover.so')):
+        # Fallback: same workspace install next to mybot (works even if overlay not re-sourced)
+        cand = os.path.normpath(os.path.join(pkg_share, '..', '..', '..', 'yzbot_gazebo_plugins', 'lib'))
+        if os.path.isfile(os.path.join(cand, 'libdyn_obs_mover.so')):
+            plugin_lib = cand
+        else:
+            cand2 = os.path.expanduser('~/dev_ws/yzbot/install/yzbot_gazebo_plugins/lib')
+            if os.path.isfile(os.path.join(cand2, 'libdyn_obs_mover.so')):
+                plugin_lib = cand2
+    if not plugin_lib:
+        raise RuntimeError(
+            "libdyn_obs_mover.so not found. Run:\n"
+            "  cd ~/dev_ws/yzbot && colcon build --packages-select yzbot_gazebo_plugins\n"
+            "  source ~/dev_ws/yzbot/install/setup.bash"
+        )
+    gazebo_plugin_path = plugin_lib
+    if os.environ.get('GAZEBO_PLUGIN_PATH'):
+        gazebo_plugin_path = plugin_lib + ':' + os.environ['GAZEBO_PLUGIN_PATH']
+    set_plugin_path = SetEnvironmentVariable(
+        'GAZEBO_PLUGIN_PATH', gazebo_plugin_path
+    )
+    print(f'[gazebo_world2] GAZEBO_PLUGIN_PATH += {plugin_lib}', flush=True)
+
+    # 合并启动 Gazebo（动态障碍由世界插件 dyn_obs_mover 在仿真内驱动）
     start_gazebo_cmd = ExecuteProcess(
         cmd=['gazebo', '--verbose',
              '-s', 'libgazebo_ros_init.so',
              '-s', 'libgazebo_ros_factory.so',
+             '-s', 'libgazebo_ros_state.so',
              world_file_path],
         output='screen'
     )
@@ -46,17 +83,20 @@ def generate_launch_description():
         output='screen'
     )
 
-    # 在 Gazebo 中生成机器人（通过 robot_description 话题）
+    # 在 Gazebo 中生成机器人（等世界加载后再 spawn，避免小车丢失）
     spawn_entity_cmd = Node(
         package='gazebo_ros',
         executable='spawn_entity.py',
         arguments=[
             '-entity', robot_name_in_model,
             '-topic', 'robot_description',
-            '-x', '0.0', '-y', '0.0', '-z', '0.0', '-Y', '0.0'
+            '-timeout', '180.0',
+            '-x', '0.0', '-y', '0.0', '-z', '0.05', '-Y', '0.0'
         ],
         output='screen'
     )
+    # offic_room 较大，立即 spawn 常失败；延迟几秒等 /spawn_entity 就绪
+    delayed_spawn = TimerAction(period=8.0, actions=[spawn_entity_cmd])
 
     # ========== 使用 spawner 加载控制器（替代 ros2 control 命令） ==========
     # 1. 关节状态广播器
@@ -106,6 +146,8 @@ def generate_launch_description():
         )
     )
 
+    # 动态障碍改由世界插件 libdyn_obs_mover.so 驱动（不依赖 ROS/gz CLI）
+
     # robot_localization EKF 节点
     robot_localization_node = Node(
         package='robot_localization',
@@ -116,9 +158,10 @@ def generate_launch_description():
     )
 
     ld = LaunchDescription()
+    ld.add_action(set_plugin_path)
     ld.add_action(start_gazebo_cmd)
     ld.add_action(node_robot_state_publisher)
-    ld.add_action(spawn_entity_cmd)
+    ld.add_action(delayed_spawn)
     ld.add_action(evt1)
     ld.add_action(evt2)
     ld.add_action(evt3)

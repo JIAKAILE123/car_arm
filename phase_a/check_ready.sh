@@ -4,7 +4,7 @@ set -eo pipefail
 # ROS setup.bash 会读未定义变量，不能开 nounset
 set +u
 source /opt/ros/humble/setup.bash
-source "${HOME}/dev_ws/install/setup.bash"
+source "${HOME}/dev_ws/yzbot/install/setup.bash"
 set -u
 
 ok=0

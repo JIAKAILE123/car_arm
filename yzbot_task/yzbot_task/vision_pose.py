@@ -356,15 +356,135 @@ def pose_sanity_arm_base(pose: PoseStamped) -> Tuple[bool, str]:
 
 
 def approach_xy_for_cube(
-    color: str, cube_id: int, *, standoff_m: float = 0.35
+    color: str,
+    cube_id: int,
+    *,
+    standoff_m: float = 0.35,
+    robot_xy: Optional[Tuple[float, float]] = None,
+    robot_yaw: Optional[float] = None,
 ) -> Tuple[float, float, float]:
-    """Map pose facing the cube at arm-reachable standoff (yaw=π → look −x).
+    """Park axis-aligned with base +X facing the cube (camera must see it).
 
-    offic_room cubes at x≈−1.5..−1.9. Old approach x=−0.55 ⇒ ~0.95 m gap —
-    short arm cannot reach. Park at cube_x + standoff.
+    Blue#2: EAST of cube (map x > cube x) — stand on +X side.
+    Other blue: WEST of cube (map x < cube x).
+    Red: prefer same-Y (±x); N/S only if clearly nearer.
+    Yaw is always atan2(cube − park) so the front camera looks at the cube.
     """
     cx, cy, _z = known_cube_xy(color, cube_id)
-    return float(cx + standoff_m), float(cy), float(np.pi)
+    so = float(standoff_m)
+
+    def _face(ax: float, ay: float) -> float:
+        return float(np.arctan2(cy - ay, cx - ax))
+
+    if str(color).lower() == "blue":
+        # Farther park so Nav2 / creep do not sit on the cube (FOV miss).
+        so_b = max(so, 0.60)
+        cid = int(cube_id)
+
+        # blue#1：东侧贴墙。停在来向的北/南/西，目标 yaw 就是面对方块，
+        # 避免西停朝东、开过来还要再拧 90°。
+        if cid == 1:
+            so1 = max(so_b, 0.65)
+            if robot_xy is not None:
+                rx, ry = float(robot_xy[0]), float(robot_xy[1])
+                if abs(ry - float(cy)) >= abs(rx - float(cx)):
+                    if ry >= float(cy):
+                        ax, ay = float(cx), float(cy) + so1
+                    else:
+                        ax, ay = float(cx), float(cy) - so1
+                else:
+                    ax, ay = float(cx) - so1, float(cy)
+            else:
+                ax, ay = float(cx), float(cy) + so1
+            # 只改蓝1目标朝向：到点常少转约 8°，目标再往方块一侧补一点
+            yaw = _face(ax, ay)
+            if ay > float(cy):
+                yaw += 0.14
+            elif ay < float(cy):
+                yaw -= 0.14
+            else:
+                yaw += 0.10
+            return ax, ay, float(np.arctan2(np.sin(yaw), np.cos(yaw)))
+
+        # blue#3: park WEST, face +X (camera on cube, clear of neighbors).
+        if cid == 3:
+            ax, ay = float(cx) - so_b, float(cy)
+            return ax, ay, _face(ax, ay)
+
+        # blue#5：C 区往南。停在 x 正侧，车头朝西对块，不绕到北侧。
+        if cid == 5:
+            so5 = max(so_b, 0.70)
+            ax, ay = float(cx) + so5, float(cy)
+            return ax, ay, _face(ax, ay)
+
+        # blue#4: park WEST (x−), face +X toward the cube.
+        if cid == 4:
+            so4 = max(so_b, 0.70)
+            ax, ay = float(cx) - so4, float(cy)
+            return ax, ay, _face(ax, ay)
+
+        # Park on the SAME side of the cube as the robot — never force west
+        # when the car is east (that path drives over the block).
+        if robot_xy is not None:
+            rx = float(robot_xy[0])
+            if rx >= float(cx):
+                ax, ay = float(cx + so_b), float(cy)  # east, face −X
+            else:
+                ax, ay = float(cx - so_b), float(cy)  # west, face +X
+        elif cid == 2:
+            ax, ay = float(cx + so_b), float(cy)
+        else:
+            ax, ay = float(cx - so_b), float(cy)
+        return ax, ay, _face(ax, ay)
+
+    # Red: ALWAYS park on the robot's side (never cross over the cube).
+    # Prefer ±X (side) docks — N/S parks often sit in the lower dyn_obs lane
+    # and the first-red approach from start then never puts the cube in FOV.
+    # All reds use the same standoff (no 0.70 special — that caused far-grab).
+    so_r = max(float(standoff_m), 0.55)
+    cid = int(cube_id)
+
+    # red#2：固定停在物块东侧同 y（map x=-4.5），车体与 x 轴平行、朝西正对块。
+    # 物块约 (-5.20, 0.00)；停 (-4.5, cy) → yaw=π（−X）。
+    if cid == 2:
+        ax, ay = -4.5, float(cy)
+        return ax, ay, float(np.pi)
+
+    # red#1 near blue#3 / zone A — park WEST.
+    if cid == 1:
+        ax, ay = float(cx) - so_r, float(cy)
+        return ax, ay, _face(ax, ay)
+
+    # red#3：停在物块 +Y 0.75m（同 x），车头朝南正对块，然后交视觉。
+    # 南侧 y≈-4.4 有墙，不往 -Y 停。
+    if cid == 3:
+        ax, ay = float(cx), float(cy) + 0.75
+        return ax, ay, _face(ax, ay)
+
+    # red#4：东停朝西，第一次就对块
+    if cid == 4:
+        so4 = max(so_r, 0.58)
+        ax, ay = float(cx) + so4, float(cy)
+        return ax, ay, _face(ax, ay)
+
+    if robot_xy is None:
+        ax, ay = float(cx + so_r), float(cy)
+        return ax, ay, _face(ax, ay)
+
+    rx, ry = float(robot_xy[0]), float(robot_xy[1])
+    dx, dy = rx - float(cx), ry - float(cy)
+    # Bias to lateral park (keeps camera aimed at cube, clear of obs2)
+    use_side = abs(dx) + 0.40 >= abs(dy)
+    if use_side:
+        if abs(dx) < 0.30:
+            ax = float(cx + so_r)  # nearly aligned → stand east (open corridor)
+        else:
+            ax = float(cx + so_r) if dx >= 0.0 else float(cx - so_r)
+        ay = float(cy)
+    else:
+        ax = float(cx)
+        ay = float(cy + so_r) if dy >= 0.0 else float(cy - so_r)
+    return ax, ay, _face(ax, ay)
 
 
 def diagnose_est_vs_known(
@@ -435,21 +555,21 @@ def ee_to_pose_distance_m(tf_buffer: Buffer, pose_arm: PoseStamped) -> Optional[
     return float(np.sqrt(dx * dx + dy * dy + dz * dz))
 
 
-# Scattered XY (seed=20260909); Z kept on floor (official state ~0.015), not mid-air.
-# Park uses approach_xy_for_cube → (x+standoff, y, yaw=π).
+# Compact cluster west of mid-wall: zones + mixed red/blue so any 5-pick
+# tour (random colors/zones) keeps a short worst-case path. Zone A sits
+# just south of blue#3.
 _KNOWN_CUBES = {
-    ("red", 1): (-6.89, -2.80, 0.015),
-    ("red", 2): (-2.89, -5.85, 0.015),
-    ("red", 3): (-2.02, -4.50, 0.015),
-    ("red", 4): (-2.77, 5.80, 0.015),
-    ("red", 5): (-2.08, 3.66, 0.015),
-    ("blue", 1): (-6.18, 5.50, 0.015),
-    ("blue", 2): (-8.21, -5.21, 0.015),
-    ("blue", 3): (-7.08, 2.35, 0.015),
-    ("blue", 4): (-5.77, -5.28, 0.015),
-    ("blue", 5): (-4.51, 4.14, 0.015),
+    ("red", 1): (0.80, 0.20, 0.015),
+    ("red", 2): (-5.20, 0.00, 0.015),
+    ("red", 3): (-1.00, -3.80, 0.015),
+    ("red", 4): (1.40, -4.60, 0.015),
+    ("red", 5): (-5.20, -7.10, 0.015),
+    ("blue", 1): (0.60, -2.20, 0.015),
+    ("blue", 2): (-0.60, 1.90, 0.015),
+    ("blue", 3): (6.20, -2.60, 0.015),
+    ("blue", 4): (-7.70, -3.00, 0.015),
+    ("blue", 5): (-0.60, -8.30, 0.015),
 }
-
 
 def known_cube_xy(color: str, cube_id: int):
     """Map pose of numbered cube (must match Gazebo world)."""
@@ -464,8 +584,8 @@ def cube_bearing_in_base(
 ) -> Optional[Tuple[float, float, Tuple[float, float, float]]]:
     """Map known cube → (bearing_rad, range_xy, map_xyz) in base_link.
 
-    bearing = atan2(y, x): 0 = straight ahead, + = left of robot.
-    Used to AIM chassis toward cube before visual lock (no blind search).
+    bearing = atan2(y, x) in base_link: 0 = ahead (+X), + = left (+Y), − = right.
+    Do NOT clamp x>0 — that flipped the turn when the cube was slightly behind.
     """
     from tf2_geometry_msgs import do_transform_point
 
@@ -484,7 +604,8 @@ def cube_bearing_in_base(
         except Exception:  # noqa: BLE001
             return None
     bx, by = float(p.point.x), float(p.point.y)
-    bearing = float(np.arctan2(by, max(bx, 1e-3)))
+    # Full atan2 — preserves quadrant (behind-left / behind-right)
+    bearing = float(np.arctan2(by, bx))
     rng = float(np.hypot(bx, by))
     return bearing, rng, (x, y, z)
 

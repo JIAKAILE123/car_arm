@@ -1,44 +1,47 @@
 amcl:
   ros__parameters:
     use_sim_time: True
-    # Odom noise: slightly higher so laser can correct without thrashing
-    alpha1: 0.2
-    alpha2: 0.2
-    alpha3: 0.2
-    alpha4: 0.2
-    alpha5: 0.2
+    # Trust odom a bit more on small in-place twists (office walls look alike)
+    alpha1: 0.15
+    alpha2: 0.15
+    alpha3: 0.15
+    alpha4: 0.15
+    alpha5: 0.15
     base_frame_id: "base_footprint"
+    # Beam skip: ignore rays that hit moving dyn_obs (not in static map)
     beam_skip_distance: 0.5
-    beam_skip_error_threshold: 0.9
-    beam_skip_threshold: 0.3
-    do_beamskip: false
+    beam_skip_error_threshold: 0.85
+    beam_skip_threshold: 0.45
+    do_beamskip: true
     global_frame_id: "map"
     lambda_short: 0.1
     laser_likelihood_max_dist: 2.0
     laser_max_range: 12.0
     laser_min_range: 0.3
     laser_model_type: "likelihood_field"
-    max_beams: 90
-    max_particles: 2000
-    min_particles: 800
+    max_beams: 48
+    # 性能微调：粒子略增；更新阈值保持原值（过勤会抖、到处转）
+    max_particles: 700
+    min_particles: 200
     odom_frame_id: "odom"
-    pf_err: 0.03
+    pf_err: 0.05
     pf_z: 0.99
-    # High fast recovery makes particle cloud jump ("点图一直在变")
+    # No recovery jump — dyn_obs otherwise make the cloud “飘”
     recovery_alpha_fast: 0.0
     recovery_alpha_slow: 0.0
-    resample_interval: 2
+    resample_interval: 3
     robot_model_type: "nav2_amcl::DifferentialMotionModel"
     save_pose_rate: 0.5
-    sigma_hit: 0.2
-    tf_broadcast: true
-    transform_tolerance: 1.0
-    # Update a bit more often for tracking, but trust laser more (below)
-    update_min_a: 0.15
-    update_min_d: 0.15
+    sigma_hit: 0.25
+    # GT localization (gt_localization node) owns map→odom — AMCL must NOT broadcast TF
+    tf_broadcast: false
+    transform_tolerance: 0.5
+    # Laser updates unused for TF; keep thresholds high so AMCL stays idle
+    update_min_a: 0.40
+    update_min_d: 0.30
     z_hit: 0.75
     z_max: 0.05
-    z_rand: 0.2
+    z_rand: 0.15
     z_short: 0.05
     scan_topic: scan
 
@@ -49,7 +52,7 @@ bt_navigator:
     robot_base_frame: base_footprint
     odom_topic: /odometry/filtered
     # EKF owns odom→base_footprint TF; Nav2 uses filtered odom.
-    bt_loop_duration: 10
+    bt_loop_duration: 20
     default_server_timeout: 20
     wait_for_service_timeout: 1000
     action_server_result_timeout: 900.0
@@ -68,11 +71,11 @@ bt_navigator:
 controller_server:
   ros__parameters:
     use_sim_time: True
-    controller_frequency: 20.0
+    controller_frequency: 15.0
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.0
     min_theta_velocity_threshold: 0.001
-    failure_tolerance: 0.3
+    failure_tolerance: 0.4
     progress_checker_plugins: ["progress_checker"]
     goal_checker_plugins: ["general_goal_checker"]
     controller_plugins: ["FollowPath"]
@@ -80,146 +83,200 @@ controller_server:
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
-      required_movement_radius: 0.5
-      movement_time_allowance: 10.0
+      required_movement_radius: 0.20
+      movement_time_allowance: 14.0
 
     general_goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.25
-      yaw_goal_tolerance: 0.5
+      xy_goal_tolerance: 0.32
+      # 到点勿死磕朝向；本地 FACE/DOCK 再细调
+      yaw_goal_tolerance: 0.85
 
-    # DWB 控制器配置
+    # Line speed kept; yaw slowed — fast spin was skewing Nav / AMCL
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
-      debug_trajectory_details: True
-      min_vel_x: 0.0
+      debug_trajectory_details: False
+      # 倒车限幅：过大容易在墙边倒着撞
+      min_vel_x: -0.55
       min_vel_y: 0.0
-      max_vel_x: 1.0
-      max_vel_y: 0.0          # 差速机器人无侧向速度
-      # 线速度保持 1.0
-      max_vel_theta: 1.0
+      max_vel_x: 2.7
+      max_vel_y: 0.0
+      # 墙边/杆端转弯需要够用的角速度，只比原来略低
+      max_vel_theta: 0.95
       min_speed_xy: 0.0
-      max_speed_xy: 1.0
+      max_speed_xy: 2.7
       min_speed_theta: 0.0
-      acc_lim_x: 2.5
+      acc_lim_x: 2.4
       acc_lim_y: 0.0
-      acc_lim_theta: 2.0
-      decel_lim_x: -2.5
+      acc_lim_theta: 1.35
+      decel_lim_x: -2.4
       decel_lim_y: 0.0
-      decel_lim_theta: -2.0
+      decel_lim_theta: -1.35
       vx_samples: 20
-      vy_samples: 5
-      vtheta_samples: 20
-      sim_time: 2.0
+      vy_samples: 1
+      vtheta_samples: 28
+      # 高速前瞻加长：少短视拧弯，贴轨靠弱化 PathAlign/PathDist
+      sim_time: 1.6
       sim_granularity: 0.05
-      angular_sim_granularity: 0.1
-      xy_goal_tolerance: 0.25
-      yaw_goal_tolerance: 0.5
-      transform_tolerance: 0.2
-      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
+      angular_sim_granularity: 0.06
+      xy_goal_tolerance: 0.34
+      yaw_goal_tolerance: 0.80
+      transform_tolerance: 0.3
+      prune_plan: true
+      prune_distance: 1.5
+      critics: ["RotateToGoal", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
       RotateToGoal:
         enabled: true
-        scale: 8.0
-      Oscillation:
-        enabled: true
+        scale: 1.0
+        slowing_factor: 5.0
       BaseObstacle:
         enabled: true
-        # 局部躲障；不靠超大膨胀堵死走廊
-        scale: 36.0
+        # 必须够硬，否则会穿膨胀直接撞墙；略低于旧 20，减轻假墙卡死
+        scale: 18.0
       GoalAlign:
         enabled: true
-        scale: 12.0
+        scale: 2.2
       PathAlign:
         enabled: true
-        scale: 24.0
+        scale: 5.5
       PathDist:
         enabled: true
-        scale: 28.0
+        scale: 10.0
       GoalDist:
         enabled: true
         scale: 24.0
+
 
 local_costmap:
   local_costmap:
     ros__parameters:
       use_sim_time: True
-      update_frequency: 5.0
+      update_frequency: 7.0
       publish_frequency: 2.0
       global_frame: odom
       robot_base_frame: base_footprint
       rolling_window: true
       width: 3
       height: 3
-      resolution: 0.05
-      # 贴近真实轮距；膨胀要小，否则窄通道红色连成一片
-      footprint: "[[0.42, 0.43], [0.42, -0.43], [-0.42, -0.43], [-0.42, 0.43]]"
+      resolution: 0.07
+      footprint: "[[0.38, 0.40], [0.38, -0.40], [-0.36, -0.40], [-0.36, 0.40]]"
       footprint_padding: 0.03
-      plugins: ["voxel_layer", "inflation_layer"]
+      plugins: ["obstacle_layer", "denoise_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 5.0
-        inflation_radius: 0.45
-      voxel_layer:
-        plugin: "nav2_costmap_2d::VoxelLayer"
+        # 恢复安全膨胀：防撞优先；卡死靠 recovery 倒车，不靠削薄墙
+        cost_scaling_factor: 4.0
+        inflation_radius: 0.38
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
-        publish_voxel_map: True
-        origin_z: 0.0
-        z_resolution: 0.05
-        z_voxels: 16
-        max_obstacle_height: 2.0
-        mark_threshold: 0
-        observation_sources: scan
+        footprint_clearing_enabled: True
+        observation_persistence: 0.0
+        expected_update_rate: 0.0
+        combination_method: 1
+        observation_sources: scan zone_keepout dyn_obs_predict
         scan:
           topic: /scan
           max_obstacle_height: 2.0
           clearing: True
           marking: True
           data_type: "LaserScan"
-          raytrace_max_range: 15.0
-          raytrace_min_range: 0.0
-          obstacle_max_range: 15.0
+          raytrace_max_range: 8.0
+          raytrace_min_range: 0.25
+          obstacle_max_range: 6.0
+          # 忽略车身/近距误点，否则局部图围一圈灰点 → 原地转
+          obstacle_min_range: 0.45
+          inf_is_valid: false
+        # Place pads A/B/C (from task_sm) — plan around so chassis doesn't climb cubes
+        zone_keepout:
+          topic: /yzbot/zone_keepout
+          max_obstacle_height: 2.0
+          clearing: False
+          marking: True
+          data_type: "PointCloud2"
+          obstacle_max_range: 100.0
           obstacle_min_range: 0.0
-      static_layer:
-        plugin: "nav2_costmap_2d::StaticLayer"
-        map_subscribe_transient_local: True
-      always_send_full_costmap: True
+          raytrace_max_range: 0.0
+          raytrace_min_range: 0.0
+          observation_persistence: 4.0
+        # Short-horizon predicted bars (mild persist — avoid far crawl)
+        dyn_obs_predict:
+          topic: /yzbot/dyn_obs_predict
+          max_obstacle_height: 2.0
+          clearing: False
+          marking: True
+          data_type: "PointCloud2"
+          obstacle_max_range: 100.0
+          obstacle_min_range: 0.0
+          raytrace_max_range: 0.0
+          raytrace_min_range: 0.0
+          observation_persistence: 0.22
+      denoise_layer:
+        plugin: "nav2_costmap_2d::DenoiseLayer"
+        enabled: True
+        minimal_group_size: 4
+        group_connectivity_type: 8
+      always_send_full_costmap: False
+
 
 global_costmap:
   global_costmap:
     ros__parameters:
       use_sim_time: True
       update_frequency: 1.0
-      publish_frequency: 1.0
+      publish_frequency: 0.5
       global_frame: map
       robot_base_frame: base_footprint
-      footprint: "[[0.42, 0.43], [0.42, -0.43], [-0.42, -0.43], [-0.42, 0.43]]"
-      footprint_padding: 0.03
-      resolution: 0.05
+      footprint: "[[0.38, 0.40], [0.38, -0.40], [-0.36, -0.40], [-0.36, 0.40]]"
+      footprint_padding: 0.02
+      resolution: 0.08
       track_unknown_space: true
-      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      plugins: ["static_layer", "obstacle_layer", "denoise_layer", "inflation_layer"]
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
-        observation_sources: scan
+        footprint_clearing_enabled: True
+        observation_persistence: 0.0
+        expected_update_rate: 0.0
+        combination_method: 1
+        # 全局不画动障预测：NavFn 走短几何路；近处由 local + dyn_obs_predict 躲杆
+        observation_sources: scan zone_keepout
         scan:
           topic: /scan
           max_obstacle_height: 2.0
           clearing: True
           marking: True
           data_type: "LaserScan"
-          raytrace_max_range: 15.0
-          raytrace_min_range: 0.0
-          obstacle_max_range: 15.0
+          raytrace_max_range: 8.0
+          raytrace_min_range: 0.25
+          obstacle_max_range: 6.0
+          obstacle_min_range: 0.45
+          inf_is_valid: false
+        zone_keepout:
+          topic: /yzbot/zone_keepout
+          max_obstacle_height: 2.0
+          clearing: False
+          marking: True
+          data_type: "PointCloud2"
+          obstacle_max_range: 100.0
           obstacle_min_range: 0.0
+          raytrace_max_range: 0.0
+          raytrace_min_range: 0.0
+          observation_persistence: 4.0
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
+      denoise_layer:
+        plugin: "nav2_costmap_2d::DenoiseLayer"
+        enabled: True
+        minimal_group_size: 3
+        group_connectivity_type: 8
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 5.0
-        inflation_radius: 0.45
-      always_send_full_costmap: True
+        cost_scaling_factor: 4.0
+        inflation_radius: 0.38
+      always_send_full_costmap: False
 
 map_server:
   # The yaml_filename does not need to be specified since it going to be set by defaults in launch.
@@ -241,12 +298,12 @@ map_saver:
 planner_server:
   ros__parameters:
     use_sim_time: True
-    expected_planner_frequency: 20.0
+    expected_planner_frequency: 2.0
     planner_plugins: ["GridBased"]
     GridBased:
       plugin: "nav2_navfn_planner/NavfnPlanner"
-      tolerance: 0.5
-      use_astar: false
+      tolerance: 0.8
+      use_astar: true
       allow_unknown: true
 
 smoother_server:
@@ -256,8 +313,8 @@ smoother_server:
     simple_smoother:
       plugin: "nav2_smoother::SimpleSmoother"
       tolerance: 1.0e-10
-      max_its: 1000
-      do_refinement: True
+      max_its: 200
+      do_refinement: False
 
 behavior_server:
   ros__parameters:
@@ -266,7 +323,7 @@ behavior_server:
     global_costmap_topic: global_costmap/costmap_raw
     local_footprint_topic: local_costmap/published_footprint
     global_footprint_topic: global_costmap/published_footprint
-    cycle_frequency: 10.0
+    cycle_frequency: 5.0
     behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
     spin:
       plugin: "nav2_behaviors/Spin"
@@ -281,16 +338,16 @@ behavior_server:
     local_frame: odom
     global_frame: map
     robot_base_frame: base_footprint
-    transform_tolerance: 0.1
-    simulate_ahead_time: 2.0
-    max_rotational_vel: 0.6
-    min_rotational_vel: 0.2
-    rotational_acc_lim: 1.5
+    transform_tolerance: 0.2
+    simulate_ahead_time: 1.5
+    max_rotational_vel: 0.80
+    min_rotational_vel: 0.10
+    rotational_acc_lim: 1.2
 
 waypoint_follower:
   ros__parameters:
     use_sim_time: True
-    loop_rate: 20
+    loop_rate: 5
     stop_on_failure: false
     action_server_result_timeout: 900.0
     waypoint_task_executor_plugin: "wait_at_waypoint"
@@ -302,15 +359,16 @@ waypoint_follower:
 velocity_smoother:
   ros__parameters:
     use_sim_time: True
+    # High smoother rate + soft accel = silk; yaw still capped for AMCL
     smoothing_frequency: 20.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [1.0, 0.0, 1.0]
-    min_velocity: [-0.8, 0.0, -1.0]
-    max_accel: [2.5, 0.0, 2.0]
-    max_decel: [-2.5, 0.0, -2.0]
+    max_velocity: [2.7, 0.0, 0.62]
+    min_velocity: [-0.55, 0.0, -0.80]
+    max_accel: [2.4, 0.0, 0.58]
+    max_decel: [-2.4, 0.0, -0.58]
     odom_topic: "odometry/filtered"
-    odom_duration: 0.1
+    odom_duration: 0.12
     deadband_velocity: [0.0, 0.0, 0.0]
     velocity_timeout: 1.0
 
@@ -322,28 +380,30 @@ collision_monitor:
     cmd_vel_in_topic: "cmd_vel_smoothed"
     cmd_vel_out_topic: "cmd_vel"
     state_topic: "collision_monitor_state"
-    transform_tolerance: 0.2
-    source_timeout: 1.0
+    transform_tolerance: 0.3
+    source_timeout: 1.5
     base_shift_correction: True
     stop_pub_timeout: 2.0
-    # 两圈：大圈减速（还能跟规划走）→ 小圈才硬停
-    polygons: ["PolygonSlow", "PolygonStop"]
-    PolygonSlow:
-      type: "circle"
-      radius: 0.70
-      action_type: "slowdown"
-      min_points: 4
-      slowdown_ratio: 0.35
-      visualize: True
-      polygon_pub_topic: "polygon_slowdown"
-      enabled: True
+    # Stop before impact, then Nav2 can replan; outer ring only slows
+    polygons: ["PolygonStop", "PolygonCrawl"]
     PolygonStop:
       type: "circle"
-      radius: 0.38
+      # 略加大急停圈，激光看见墙就先刹，少顶死
+      radius: 0.48
       action_type: "stop"
-      min_points: 4
-      visualize: True
+      min_points: 3
+      visualize: False
       polygon_pub_topic: "polygon_stop"
+      enabled: True
+    PolygonCrawl:
+      type: "circle"
+      # 只在真正靠近时慢行，避免远处物块旁爬行
+      radius: 0.58
+      action_type: "slowdown"
+      min_points: 4
+      slowdown_ratio: 0.45
+      visualize: False
+      polygon_pub_topic: "polygon_crawl"
       enabled: True
     observation_sources: ["scan"]
     scan:

@@ -1,0 +1,28 @@
+<!-- C-zone interior parking.
+
+     The C mouth / C room passage is only ~1.55 m wide and the base is ~0.8 m
+     wide, so after the normal 0.38 m inflation a single feasible corridor is
+     left. The default tree reacted to "no progress" with BackUp 0.28 m and
+     immediately re-planned forward, which showed up as a ~2 s back/forth
+     rocking in front of the C pad.
+
+     Here: slow replan (0.3 Hz) so the local controller stops chasing a new
+     path every 2 s, and the recovery clears the local costmap + waits instead
+     of reversing.
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="3" name="CZoneRecovery">
+      <PipelineSequence name="CZoneSteady">
+        <RateController hz="0.3">
+          <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+        </RateController>
+        <FollowPath path="{path}" controller_id="FollowPath"/>
+      </PipelineSequence>
+      <Sequence name="CZoneUnstickNoReverse">
+        <ClearEntireCostmap name="ClearLocalCZone" service_name="local_costmap/clear_entirely_local_costmap"/>
+        <Wait wait_duration="0.5"/>
+      </Sequence>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

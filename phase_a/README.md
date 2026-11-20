@@ -29,13 +29,13 @@
 
 ```bash
 source /opt/ros/humble/setup.bash
-source ~/dev_ws/install/setup.bash
+source ~/dev_ws/yzbot/install/setup.bash
 ```
 
 ## 开局清单（控制器 + 定位）
 
 ```bash
-cd ~/dev_ws/src/yzbot/phase_a
+cd ~/dev_ws/yzbot/src/phase_a
 bash check_ready.sh
 ```
 

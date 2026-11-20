@@ -34,11 +34,11 @@
     </gazebo>
 
 
-    <xacro:macro name="ros2_control_joint" params="joint_name">
+    <xacro:macro name="ros2_control_joint" params="joint_name min:=-3.14 max:=3.14">
         <joint name="${joint_name}">
             <command_interface name="position">
-                <param name="min">-1</param>
-                <param name="max">1</param>
+                <param name="min">${min}</param>
+                <param name="max">${max}</param>
             </command_interface>
             <state_interface name="position">
                 <param name="initial_value">0.0</param>
@@ -51,14 +51,15 @@
         <hardware>
             <plugin>gazebo_ros2_control/GazeboSystem</plugin>
         </hardware>
+        <!-- Was wrongly ±1 → PICK j2/j3≈1.15 rejected, arm stayed up -->
         <xacro:ros2_control_joint joint_name="joint1" />
-        <xacro:ros2_control_joint joint_name="joint2" />
-        <xacro:ros2_control_joint joint_name="joint3" />
+        <xacro:ros2_control_joint joint_name="joint2" min="-2.35" max="2.35" />
+        <xacro:ros2_control_joint joint_name="joint3" min="-2.62" max="2.62" />
         <xacro:ros2_control_joint joint_name="joint4" />
-        <xacro:ros2_control_joint joint_name="joint5" />
+        <xacro:ros2_control_joint joint_name="joint5" min="-2.35" max="2.35" />
         <xacro:ros2_control_joint joint_name="joint6" />
-        <xacro:ros2_control_joint joint_name="finger_joint1" />
-        <xacro:ros2_control_joint joint_name="finger_joint2" />
+        <xacro:ros2_control_joint joint_name="finger_joint1" min="0.0" max="0.08" />
+        <xacro:ros2_control_joint joint_name="finger_joint2" min="0.0" max="0.08" />
     </ros2_control>
 
     <!-- gazebo_ros2_contril -->

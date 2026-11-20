@@ -1,44 +1,41 @@
 <!--
-  Stable nav for small rooms:
-  - Replan ONLY when path invalid (not every 1s → less path flicker)
-  - Prefer clear/backup over spin (avoid spinning in rooms while lost)
+  Smooth drive + dyn_obs: replan ~2.0 Hz; on stuck STOP → brief wait → backup → clear → replan.
 -->
 <root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
-    <RecoveryNode number_of_retries="4" name="NavigateRecovery">
+    <RecoveryNode number_of_retries="12" name="NavigateRecovery">
       <PipelineSequence name="NavigateWithReplanning">
+        <!-- 0.5Hz：路径别老改，否则 FollowPath 一直被打断 → 慢倒/不转弯 -->
         <RateController hz="0.5">
-          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
-            <Fallback>
-              <ReactiveSequence name="KeepPathIfValid">
-                <Inverter>
-                  <GlobalUpdatedGoal/>
-                </Inverter>
-                <IsPathValid path="{path}"/>
-              </ReactiveSequence>
-              <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
-            </Fallback>
+          <RecoveryNode number_of_retries="2" name="ComputePathToPose">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
             <ClearEntireCostmap name="ClearGlobal" service_name="global_costmap/clear_entirely_global_costmap"/>
           </RecoveryNode>
         </RateController>
 
-        <RecoveryNode number_of_retries="1" name="FollowPath">
+        <RecoveryNode number_of_retries="4" name="FollowPath">
           <FollowPath path="{path}" controller_id="FollowPath"/>
-          <ClearEntireCostmap name="ClearLocal" service_name="local_costmap/clear_entirely_local_costmap"/>
+          <Sequence name="UnstickLocal">
+            <!-- Stuck: brief pause, back off, clear, replan (keep waits short) -->
+            <Wait wait_duration="0.12"/>
+            <BackUp backup_dist="0.28" backup_speed="0.12"/>
+            <ClearEntireCostmap name="ClearLocal" service_name="local_costmap/clear_entirely_local_costmap"/>
+            <Wait wait_duration="0.10"/>
+          </Sequence>
         </RecoveryNode>
       </PipelineSequence>
 
       <ReactiveFallback name="RecoveryFallback">
         <GoalUpdated/>
         <RoundRobin name="RecoveryActions">
-          <Sequence name="ClearBoth">
+          <Sequence name="StopClear">
+            <Wait wait_duration="0.45"/>
             <ClearEntireCostmap name="ClearLocalRecovery" service_name="local_costmap/clear_entirely_local_costmap"/>
-            <ClearEntireCostmap name="ClearGlobalRecovery" service_name="global_costmap/clear_entirely_global_costmap"/>
           </Sequence>
-          <BackUp backup_dist="0.25" backup_speed="0.1"/>
-          <Wait wait_duration="2"/>
-          <!-- short spin only as last resort (was 1.57 rad → long room spinning) -->
-          <Spin spin_dist="0.6"/>
+          <BackUp backup_dist="0.30" backup_speed="0.09"/>
+          <Spin spin_dist="0.7"/>
+          <ClearEntireCostmap name="ClearGlobalRecovery" service_name="global_costmap/clear_entirely_global_costmap"/>
+          <Wait wait_duration="0.55"/>
         </RoundRobin>
       </ReactiveFallback>
     </RecoveryNode>

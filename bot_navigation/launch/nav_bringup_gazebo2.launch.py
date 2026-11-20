@@ -25,13 +25,14 @@ def generate_launch_description():
     default_bt_xml = os.path.join(
         navigation2_dir, 'behavior_trees', 'navigate_stable.xml'
     )
-    # Inject stable BT path into params (replan only if path invalid)
+    # Inject BT: periodic replan + recovery (stuck near door → backup/replan)
     nav2_param_path = ReplaceString(
         source_file=raw_params,
         replacements={'<nav_bt_xml>': default_bt_xml},
     )
     slam = LaunchConfiguration('slam', default='False')
-    rviz_config_dir = os.path.join(nav2_bringup_dir, 'rviz', 'nav2_default_view.rviz')
+    # 包内 RViz：与原版一致，仅关掉 LaserScan 红点；地图/膨胀等全开
+    rviz_config_dir = os.path.join(navigation2_dir, 'rviz', 'nav2_default_view.rviz')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -60,6 +61,40 @@ def generate_launch_description():
                 'params_file': nav2_param_path,
                 'slam': slam,
             }.items(),
+        ),
+        # Hard stop before dyn_obs impact (params: collision_monitor in yaml)
+        Node(
+            package='nav2_collision_monitor',
+            executable='collision_monitor',
+            name='collision_monitor',
+            output='screen',
+            parameters=[raw_params, {'use_sim_time': use_sim_time}],
+        ),
+        # Predict dyn_obs short horizon into costmap (avoid meet-in-the-middle hits)
+        Node(
+            package='yzbot_task',
+            executable='dyn_obs_predict',
+            name='dyn_obs_predict',
+            output='screen',
+            parameters=[{
+                'use_sim_time': use_sim_time,
+                'horizon_sec': 2.2,
+                'dt_sec': 0.20,
+                'rate_hz': 10.0,
+            }],
+        ),
+        # map→odom = I；位姿来自 Gazebo WORLD /odom → EKF（AMCL 不广播 TF）
+        Node(
+            package='yzbot_task',
+            executable='gt_localization',
+            name='gt_localization',
+            output='screen',
+            parameters=[{
+                'use_sim_time': use_sim_time,
+                'robot_model': 'six_arm',
+                'rate_hz': 30.0,
+                'publish_amcl_pose': True,
+            }],
         ),
         Node(
             package='rviz2',

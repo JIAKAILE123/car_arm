@@ -1,0 +1,14 @@
+<!-- Scoped to the C-to-blue-5 door crossing. If blocked, wait and replan without reversing into the jamb. -->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="2" name="CExitRecovery">
+      <PipelineSequence>
+        <RateController hz="0.5">
+          <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+        </RateController>
+        <FollowPath path="{path}" controller_id="FollowPath"/>
+      </PipelineSequence>
+      <Wait wait_duration="1.0"/>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

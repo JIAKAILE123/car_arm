@@ -23,6 +23,8 @@
   <depend>tf2_geometry_msgs</depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>rosbridge_server</exec_depend>
+  <exec_depend>rosapi</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>python3-pytest</test_depend>
