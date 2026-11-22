@@ -196,6 +196,7 @@ class TaskStateMachine(Node):
         self.create_timer(2.0, self._maybe_rebind_image, callback_group=self.cb_group)
         self._image_rebound = False
 
+        self._status_log_path = Path.home() / "dev_ws/yzbot/log/task_sm_status.log"
         self.status_pub = self.create_publisher(String, "/task_status", 10)
         self.info_pub = self.create_publisher(String, "/task_info", 10)
         self.plan_pub = self.create_publisher(String, "/task_plan", 10)
@@ -248,12 +249,14 @@ class TaskStateMachine(Node):
             # 直接把这一整块标死，让全局/局部规划从南侧或北侧绕开。
             # 旧范围 (1.20~1.72, -1.55~-1.08) 偏小，没盖住斜墙旁那条缝。
             # 只贴斜墙封，右边界到墙身为止，左边界让开门口通道。
-            # C 门东侧上下两段死角（用户给定角点，长宽平行世界 x/y 轴）：
-            #   下段 x -3.0~-2.0, y -2.8~-0.7
-            #   上段 x -3.0~-2.0, y  0.7~2.8
-            # 中间 y -0.7~0.7 是门洞，保持不封。
+            # C 门东侧上下两段死角（轴对齐）：
+            #   下段 x -3.0~-2.0, y -2.8~-1.5
+            #   上段 x -3.0~-2.0, y  1.5~2.8
+            # 中间必须留 >=1.6m：点云是 lethal，膨胀 0.38 两侧共吃掉 0.76m，
+            # 原来只留 1.4m（-0.7~0.7）→ 有效 0.64m < 车宽 0.8m → 规划判死、
+            # 车原地反复重规划不走。放到 3.0m 后有效 2.24m。
             east_pinch = []
-            for ya, yb in ((-2.8, -0.7), (0.7, 2.8)):
+            for ya, yb in ((-2.8, -1.5), (1.5, 2.8)):
                 y = ya
                 while y <= yb + 1e-9:
                     x = -3.0
@@ -295,6 +298,15 @@ class TaskStateMachine(Node):
         msg.data = text
         self.status_pub.publish(msg)
         self.get_logger().info(text)
+        # ROS 节点输出默认不落盘，事后没法定位；这里同步写一份状态流水。
+        try:
+            path = getattr(self, "_status_log_path", None)
+            if path is not None:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with open(path, "a", encoding="utf-8") as fh:
+                    fh.write(f"{time.time():.1f} {text}\n")
+        except Exception:  # noqa: BLE001
+            self._status_log_path = None
 
     def _on_command(self, msg: String):
         if self.busy:
@@ -552,10 +564,15 @@ class TaskStateMachine(Node):
         self._pub_status(f"NAV_C → ({fx:.2f},{fy:.2f})")
         self.motion.exit_local_mode()
         if place_mode and approach_standoff is not None:
-            # C 门口不再走 inside/outside 固定途经点。那两个点原本是为了
-            # “门口容易过不去”才加的，但 Nav2 会把没删掉的途经点当死锚点：
-            # 车已经过去了还被拽回来补点 → 门口来回磨。现在只给一个终点
-            # （区旁停靠点），由全局规划自己穿门，过不去也不会掉头。
+            # 不再用 inside/outside 成对途经点（会被当成死锚点拉回去），但
+            # 也不能从远处一个目标直接穿门：门洞外还有 dyn_obs_3 在 x=-2 扫，
+            # 一条长路径要在门口同时躲杆+过门，实测会卡在门外 1.5m 进不来。
+            # 折中：门外先单独穿到门内一点（单目标），再导航到区旁停靠点。
+            cur = self.motion.get_base_xy_yaw_map()
+            if cur is not None and not self._on_c_room_side(cur[0], cur[1]):
+                self._pub_status("NAV_C 门外 → 先穿门到门内点")
+                if not self._cross_c_door(cur, entering=True):
+                    self._pub_status("NAV_C 穿门失败，改直接导航")
             return self._nav_place_zone_safe(
                 "C",
                 fx,
@@ -2055,6 +2072,7 @@ class TaskStateMachine(Node):
         return True
 
     def _run_command(self, text: str):
+        self._pub_status(f"=== NEW COMMAND {text!r} ===")
         dry = bool(self.get_parameter("dry_run").value)
         skip_nav = bool(self.get_parameter("skip_nav").value) or dry
 
@@ -2693,17 +2711,23 @@ class TaskStateMachine(Node):
                     self.motion.set_keepout_except(zone, clear_maps=False)
                     self.motion.stop_chassis()
                     self.motion.clear_costmaps(timeout=0.4)
-                    if self._prepare_loaded_passage(zone):
-                        self._nav_place_zone_safe(
-                            zone,
-                            tx,
-                            ty,
-                            xy_tol=0.28,
-                            park_m=park_m,
-                            from_east=str(color).lower() == "blue"
-                            and int(cid) == 3,
-                            timeout=35.0,
+                    prep_ok = self._prepare_loaded_passage(zone)
+                    if not prep_ok:
+                        self._pub_status(
+                            f"PREP_PASSAGE_FAIL {zone} → 仍尝试导航到投放点"
                         )
+                    # 以前 prep 失败就整段跳过导航，2 秒后直接 PLACE_ABORT；
+                    # 现在无论如何都再尝试一次导航。
+                    self._nav_place_zone_safe(
+                        zone,
+                        tx,
+                        ty,
+                        xy_tol=0.28,
+                        park_m=park_m,
+                        from_east=str(color).lower() == "blue"
+                        and int(cid) == 3,
+                        timeout=35.0,
+                    )
                     dock_ready = self._dock_loaded_if_near(tx, ty, arm_m, park_m)
                 placed = dock_ready and self._place_with_moveit(color, cid)
             if not placed and self._released_outside_pad:

@@ -388,8 +388,9 @@ collision_monitor:
     polygons: ["PolygonStop", "PolygonCrawl"]
     PolygonStop:
       type: "circle"
-      # 略加大急停圈，激光看见墙就先刹，少顶死
-      radius: 0.48
+      # 0.48 -> 0.38：搬运时块就夹在车头前 ~0.42m，0.48 的圈会把块当障碍
+      # 一路急停（有路径但车不动）。0.38 仍贴近车半宽 0.40，墙体照旧会拦。
+      radius: 0.38
       action_type: "stop"
       min_points: 3
       visualize: False
@@ -398,7 +399,7 @@ collision_monitor:
     PolygonCrawl:
       type: "circle"
       # 只在真正靠近时慢行，避免远处物块旁爬行
-      radius: 0.58
+      radius: 0.48
       action_type: "slowdown"
       min_points: 4
       slowdown_ratio: 0.45

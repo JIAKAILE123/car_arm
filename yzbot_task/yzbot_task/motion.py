@@ -794,7 +794,7 @@ class MotionHelpers:
             footprint = (
                 "[[0.38, 0.40], [0.38, -0.40], [-0.36, -0.40], [-0.36, 0.40]]"
             )
-            stop_r, crawl_r, slow = 0.48, 0.58, 0.45
+            stop_r, crawl_r, slow = 0.38, 0.48, 0.45
         local_n, global_n = self._costmap_param_nodes()
         doubles = {
             "inflation_layer.inflation_radius": infl,
