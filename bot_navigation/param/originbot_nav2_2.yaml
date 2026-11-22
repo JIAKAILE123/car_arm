@@ -388,9 +388,11 @@ collision_monitor:
     polygons: ["PolygonStop", "PolygonCrawl"]
     PolygonStop:
       type: "circle"
-      # 0.48 -> 0.38：搬运时块就夹在车头前 ~0.42m，0.48 的圈会把块当障碍
-      # 一路急停（有路径但车不动）。0.38 仍贴近车半宽 0.40，墙体照旧会拦。
-      radius: 0.38
+      # 0.48 -> 0.38 -> 0.32：搬运时块夹在车头前 ~0.42m，圈必须 <0.42；
+      # 门洞挤压现场实测车中心距墙只有 0.34m（竖墙与杆的 ~0.9m 缝），0.38 的圈
+      # 让碰撞器在整段过门路上持续急停 → 来回徘徊。0.32 距块仍留 0.10m 余量。
+      # Humble 的 collision_monitor 不支持运行时改 polygon 参数，只能在这里定死。
+      radius: 0.32
       action_type: "stop"
       min_points: 3
       visualize: False

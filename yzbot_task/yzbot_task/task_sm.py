@@ -235,14 +235,16 @@ class TaskStateMachine(Node):
             # 这面竖墙东侧（x≈-3.2）和活动杆之间只剩约 0.9m。
             # 从南边贴墙上来会卡在 y≈-1.2，杆再过来就把车挤进墙里弹飞。
             # 只封这条缝，不改墙，东边绕开杆的路还在。
+            # 步长 0.16（原 0.10）：点 r=0.25 相邻仍重叠，覆盖不变；点数 90→27，
+            # 0.4s 周期的发布/代价图处理减半，且脱困过滤圈(0.62m)滤完后缺口更大。
             pinch_pts = []
             y = -2.40
             while y <= -1.00 + 1e-9:
                 x = -3.05
                 while x <= -2.55 + 1e-9:
                     pinch_pts.append((x, y, 0.25))
-                    x += 0.10
-                y += 0.10
+                    x += 0.16
+                y += 0.16
             self.motion.add_named_keepout("WALL_PINCH", pinch_pts)
             # 死区：上杆东端 + 斜墙端头夹出的死角（约 1.7,-1.6）。
             # 两个动障在这里交汇，车一旦被挤进来就顶在斜墙上出不去，
@@ -262,8 +264,8 @@ class TaskStateMachine(Node):
                     x = -3.0
                     while x <= -2.0 + 1e-9:
                         east_pinch.append((x, y, 0.25))
-                        x += 0.10
-                    y += 0.10
+                        x += 0.16
+                    y += 0.16
             self.motion.add_named_keepout("EAST_PINCH", east_pinch)
             # 斜墙，从 (1.85,-1.4) 往东南。车在西侧贴着走。
             # 跟红2那面墙一样，只沿墙身标一窄条，靠膨胀把车稍微推离墙。
@@ -380,13 +382,25 @@ class TaskStateMachine(Node):
         return str(zone).strip().upper() in ("A", "B")
 
     def _place_slot_xy(self, zx: float, zy: float, zone: str) -> Tuple[float, float, int]:
-        """Same-zone multi-place: keep first on center; later tiny Y only."""
+        """Same-zone multi-place: spread drop points, never stack on one spot.
+
+        旧表 Y 只错 2.5~4cm，块约 0.1m 见方——五块实际叠在同一个点。
+        新表按长边(X)±0.30 / 短边(Y)±0.17 排 5 槽；经 _place_drop_inward
+        内收(±0.18)与夹框后，任意两块（含从不同侧接近、被夹框削平）
+        落点仍 ≥ ~0.12m，不压叠，且都在垫子容差(X±0.40, Y±0.14)内。
+        """
         zkey = str(zone).strip().upper()
         n = int(self._zone_place_count.get(zkey, 0))
-        # 同区多块：只在短边(Y)上小错开，勿贴短边外
-        slots_y = (0.0, 0.025, -0.025, 0.04, -0.04)
-        dy = float(slots_y[n % len(slots_y)])
-        return float(zx), float(zy) + dy, n
+        # (dx, dy) 相对区心；第1块留在区心
+        slots = (
+            (0.0, 0.0),
+            (0.30, 0.17),
+            (-0.30, -0.17),
+            (0.30, -0.17),
+            (-0.30, 0.17),
+        )
+        dx, dy = slots[n % len(slots)]
+        return float(zx) + dx, float(zy) + dy, n
 
     def _place_drop_inward(
         self, tx: float, ty: float, zx: float, zy: float, *, zone: str = ""

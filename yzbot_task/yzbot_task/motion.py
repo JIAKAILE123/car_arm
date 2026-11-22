@@ -119,6 +119,16 @@ class MotionHelpers:
         self._zone_keepout: dict = {}
         self._placed_keepout: list = []  # always-on marks for dropped cubes
         self._keepout_except: Optional[str] = None
+        # 死区（WALL_PINCH/EAST_PINCH/WALL_DIAG）：封住区域但绝不封住车自己站的格，
+        # 否则车一旦 deviate/被障碍物挤进去，全局规划「起点在障碍里」→ 再也规划不出路径。
+        self._escape_keys: set = set()
+        # 必须 ≥ footprint 外接圆 sqrt(0.38²+0.40²)=0.55 再留余量。
+        # 0.46 的教训（2026-11-22 门洞卡死）：最近死区点距车中心 0.49m 没被
+        # 滤掉 → 车身格仍 lethal → 清图+重试全无效。
+        self._escape_r = 0.62
+        # UNSTICK 在门洞里强制开过 ease 的标记（navigate 收尾时还原）
+        self._ease_forced_by_unstick = False
+        self._base_xy_cache: Optional[Tuple[float, float]] = None
         self._keepout_pub = node.create_publisher(
             PointCloud2, "/yzbot/zone_keepout", 1
         )
@@ -289,6 +299,111 @@ class MotionHelpers:
             time.sleep(0.05)
         return True
 
+    def _inside_escape_keepout(self, margin: float = 0.16) -> bool:
+        """车身当前是否压在「死区」格上（会被判成起点在障碍里）。"""
+        base = self._base_xy_fast()
+        if base is None or not self._escape_keys:
+            return False
+        bx, by = base
+        r2 = (self._escape_r + margin) ** 2
+        for key, cloud in self._zone_keepout.items():
+            if key not in self._escape_keys:
+                continue
+            for p in cloud:
+                if (p[0] - bx) ** 2 + (p[1] - by) ** 2 <= r2:
+                    return True
+        return False
+
+    def _near_c_door(self) -> bool:
+        """车身是否在 C 门洞/墙头窄缝矩形内（19:05 挤压点 (-3.54,-1.14) 在内）。"""
+        cur = self.get_base_xy_yaw_map()
+        if cur is None:
+            return False
+        return -3.95 <= cur[0] <= -2.50 and -1.75 <= cur[1] <= 0.60
+
+    def unjam_unstick(self, gx: float, gy: float) -> bool:
+        """卡死统一脱困（覆盖两类现场，动作一套）：
+
+        A. 被挤进 WALL_PINCH/EAST_PINCH 死区 → 死区点让开车身（_escape_r 已放大
+           到 0.62m 盖住外接圆）+ 清图，起点格空出来即可重规划；
+        B. 门洞窄缝被真实墙体膨胀顶住（清图无效：墙在静态层）→ NavFn/DWB/backup
+           全部失败，唯一有效动作是沿来路盲退，把 footprint 退出膨胀带。
+        两类都收尾于「重新发 goal 重试」，不再各修各的。
+        """
+        cur = self.get_base_xy_yaw_map()
+        s = (
+            f"start=({cur[0]:.2f},{cur[1]:.2f})"
+            if cur is not None else "start=unknown"
+        )
+        self.node.get_logger().warn(
+            f"UNSTICK {s} goal=({gx:.2f},{gy:.2f}) → "
+            f"让开车身 {self._escape_r:.2f}m 内的死区点 + 清图 + 盲退后重试"
+        )
+        try:  # 状态流水里也留一行，方便事后定位
+            self.node._pub_status(
+                f"UNSTICK {s} goal=({gx:.2f},{gy:.2f}) → 让开死区+清图+盲退后重试"
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self.stop_chassis()
+        except Exception:  # noqa: BLE001
+            pass
+        if self._near_c_door():
+            # 门洞挤压：只有 ease 的小 footprint(0.32×0.33)+膨胀0.26 塞得进这条
+            # ~0.9m 缝，绝不能按死区现场那样强制关 ease（0.74×0.80 车体必顶死）。
+            if int(getattr(self, "_mouth_depth", 0)) <= 0:
+                self.set_c_mouth_ease(True)
+                self._ease_forced_by_unstick = True
+        else:
+            # 死区里重试必须用正常 footprint/膨胀；C_MOUTH ease 的 0.26 只会更贴死区
+            if int(getattr(self, "_mouth_depth", 0)) > 0:
+                self._mouth_depth = 1
+                self.set_c_mouth_ease(False)
+                self._ease_forced_by_unstick = False
+        # 1) 先用「让开自身格」的版本重发 keepout（旧标记有 observation_persistence）
+        self._publish_zone_keepout()
+        time.sleep(0.12)
+        self._publish_zone_keepout()
+        # 2) 清图
+        self.clear_costmaps(timeout=1.0)
+        # 3) 盲退：起点压在真实墙体/密集 keepout 的膨胀里时清图没用，沿当前朝向
+        #    倒 0.45m 是物理上唯一保证远离刚才挤压面的方向（来路几秒前刚过，净空）。
+        pose0 = self.get_base_xy_yaw_map()
+        if pose0 is not None:
+            try:
+                self.enter_local_mode(settle_sec=0.5)
+                self.drive_openloop_distance(-0.45, vx=0.10, timeout=8.0)
+                self.stop_chassis()
+                self.exit_local_mode()
+                pose1 = self.get_base_xy_yaw_map()
+                moved = (
+                    math.hypot(pose1[0] - pose0[0], pose1[1] - pose0[1])
+                    if pose1 is not None else -1.0
+                )
+                self.node.get_logger().info(
+                    f"UNSTICK 盲退实测位移 {moved:.2f}m（脱离墙体/死区膨胀带）"
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.node.get_logger().warn(f"UNSTICK 盲退失败: {exc}")
+                try:
+                    self.exit_local_mode()
+                except Exception:  # noqa: BLE001
+                    pass
+            # 4) 退到位后按「新位置」重新滤点+清图（旧缓存位姿会让过滤圈错位）
+            self._base_xy_cache = None
+            self._publish_zone_keepout()
+            time.sleep(0.3)
+            self.clear_costmaps(timeout=1.0)
+            time.sleep(0.7)
+            self._publish_zone_keepout()
+            time.sleep(0.3)
+        else:
+            time.sleep(0.7)
+            self._publish_zone_keepout()
+            time.sleep(0.3)
+        return True
+
     def navigate(
         self,
         x: float,
@@ -300,6 +415,7 @@ class MotionHelpers:
         early_yaw_tol: Optional[float] = None,
         soft_start: bool = False,
         behavior_tree: str = "",
+        _retry: int = 1,
     ) -> bool:
         if self.drive_owner != "nav":
             self.node.get_logger().warn("navigate blocked until MODE_NAV; forcing exit_local")
@@ -359,11 +475,38 @@ class MotionHelpers:
         )
         result_fut = goal_handle.get_result_async()
         t0 = time.time()
+        # 停滞看门狗：25s 对目标没有任何 ≥5cm 的净进展且离目标还远 = 被卡住徘徊
+        # （DWB 全轨迹 invalid + BT backup 反复 abort，来回摆动不算进展）。
+        # 不等 90s 超时，直接走脱困重试，单段止损从 ~3.5min 缩到 ~30s。
+        best_d: Optional[float] = None
+        best_t = t0
+        stalled = False
+        poll_i = 0
         while not result_fut.done():
             if time.time() - t0 > timeout:
                 self.node.get_logger().error("nav result timeout")
                 self.cancel_nav()
                 return False
+            poll_i += 1
+            if poll_i % 8 == 0:  # ~0.4s 一次
+                pos = self.get_base_xy_yaw_map()
+                if pos is not None:
+                    dg = math.hypot(pos[0] - float(x), pos[1] - float(y))
+                    if best_d is None or dg < best_d - 0.05:
+                        best_d, best_t = dg, time.time()
+                    elif (
+                        time.time() - best_t > 25.0
+                        and dg > 1.0
+                        and best_d > 1.0
+                    ):
+                        self.node.get_logger().warn(
+                            f"NAV_STALL {(time.time() - best_t):.0f}s 无进展 "
+                            f"@({pos[0]:.2f},{pos[1]:.2f}) dist_goal={dg:.2f} "
+                            f"best={best_d:.2f} → cancel 走脱困重试"
+                        )
+                        stalled = True
+                        self.cancel_nav()
+                        break
             # 早停：仅 XY（投放/途经）或 XY+yaw（取货边走边转）
             if early_xy_tol is not None:
                 cur = self.get_base_xy_yaw_map()
@@ -395,7 +538,11 @@ class MotionHelpers:
         self._nav_goal_handle = None
         from action_msgs.msg import GoalStatus
 
-        wrapped = result_fut.result()
+        if stalled and not self._spin_until(result_fut, 3.0):
+            self.node.get_logger().warn("NAV_STALL 取消结果 3s 未回，按失败处理")
+            wrapped = None
+        else:
+            wrapped = result_fut.result()
         status = int(getattr(wrapped, "status", GoalStatus.STATUS_UNKNOWN))
         # Early cancel returns CANCELED — still OK if we already accepted above
         if status != GoalStatus.STATUS_SUCCEEDED:
@@ -410,6 +557,30 @@ class MotionHelpers:
                         )
                         return True
             self.node.get_logger().error(f"nav finished status={status} (not SUCCEEDED)")
+            # 秒失败=规划不出路径；看门狗 stalled/长失败压死区=起点在障碍里。都要救。
+            if _retry > 0 and (
+                stalled
+                or (time.time() - t0) < 4.0
+                or self._inside_escape_keepout()
+            ):
+                if self.unjam_unstick(float(x), float(y)):
+                    ok = self.navigate(
+                        x, y, yaw, timeout,
+                        early_xy_tol=early_xy_tol,
+                        early_yaw_tol=early_yaw_tol,
+                        soft_start=soft_start,
+                        behavior_tree=behavior_tree,
+                        _retry=_retry - 1,
+                    )
+                    if getattr(self, "_ease_forced_by_unstick", False):
+                        self._ease_forced_by_unstick = False
+                        self.set_c_mouth_ease(False)
+                    return ok
+            if getattr(self, "_ease_forced_by_unstick", False):
+                # unstick 在门洞强开的 ease 只能撑这一段重试；出去就恢复真实
+                # 0.74×0.80 footprint，别拿小车体轮廓在外面横冲直撞。
+                self._ease_forced_by_unstick = False
+                self.set_c_mouth_ease(False)
             return False
         return True
 
@@ -762,8 +933,10 @@ class MotionHelpers:
         collision_monitor stop circle. The monitor then brakes the base while
         DWB still thinks it can drive (the local costmap ignores lasers closer
         than 0.45 m), which is exactly the "sit there, slowly correct, then
-        move" behaviour. Shrinking the stop ring and widening the slowdown
-        ratio for these few metres removes that fight.
+        move" behaviour. The stop ring itself cannot be changed at runtime in
+        Humble (parameters are never declared), so it is set statically in the
+        yaml (0.32); this call only shrinks inflation + footprint for the few
+        metres of the crossing, which is what actually gates NavFn/DWB.
 
         Reference counted: parking is nested inside the door crossing, so an
         inner caller must not restore the normal radii while the outer one is
@@ -787,14 +960,12 @@ class MotionHelpers:
             footprint = (
                 "[[0.32, 0.33], [0.32, -0.33], [-0.30, -0.33], [-0.30, 0.33]]"
             )
-            stop_r, crawl_r, slow = 0.30, 0.40, 0.70
         else:
             infl, scale = 0.38, 4.0
             pad_l, pad_g = 0.03, 0.02
             footprint = (
                 "[[0.38, 0.40], [0.38, -0.40], [-0.36, -0.40], [-0.36, 0.40]]"
             )
-            stop_r, crawl_r, slow = 0.38, 0.48, 0.45
         local_n, global_n = self._costmap_param_nodes()
         doubles = {
             "inflation_layer.inflation_radius": infl,
@@ -810,19 +981,16 @@ class MotionHelpers:
             doubles={**doubles, "footprint_padding": pad_g},
             strings={"footprint": footprint},
         )
-        self._set_remote_params(
-            "/collision_monitor",
-            doubles={
-                "PolygonStop.radius": stop_r,
-                "PolygonCrawl.radius": crawl_r,
-                "PolygonCrawl.slowdown_ratio": slow,
-            },
-        )
+        # NOTE: Humble collision_monitor 不 declare PolygonStop./PolygonCrawl.
+        # 子参数（实测 "parameter ... cannot be set because it was not
+        # declared" 刷屏），运行时改急停环从来无效。急停环改为 yaml 静态
+        # 0.38→0.32：门洞贴墙实测中心距墙 0.34m，0.38 的圈一路急停→来回
+        # 徘徊；方块夹在车头 0.42m，0.32 仍留 0.10 余量。
         self.clear_costmaps(timeout=0.4)
         self.node.get_logger().info(
-            "C_MOUTH ease ON 膨胀0.26 急停0.30 慢行0.40"
+            "C_MOUTH ease ON 膨胀0.26 footprint0.32x0.33"
             if on
-            else "C_MOUTH ease OFF 膨胀/急停已恢复"
+            else "C_MOUTH ease OFF 膨胀/footprint 已恢复"
         )
 
     def get_base_xy_yaw_map(self) -> Optional[Tuple[float, float, float]]:
@@ -1051,11 +1219,21 @@ class MotionHelpers:
         )
         self._publish_zone_keepout()
 
-    def add_named_keepout(self, key: str, pts) -> None:
-        """Extra virtual obstacles (map frame). Not cleared by zone-except."""
-        self._zone_keepout[str(key)] = list(pts)
+    def add_named_keepout(self, key: str, pts, *, escape: bool = True) -> None:
+        """Extra virtual obstacles (map frame). Not cleared by zone-except.
+
+        escape=True → 该组是「死区」：发布时会把离车 0.46m 内的点临时略过，
+        保证车不会因为自己脚下被标成致死格而永远规划不出路径。
+        """
+        key = str(key)
+        self._zone_keepout[key] = list(pts)
+        if escape:
+            self._escape_keys.add(key)
+        else:
+            self._escape_keys.discard(key)
         self.node.get_logger().info(
-            f"KEEPOUT {key} n={len(self._zone_keepout[str(key)])}"
+            f"KEEPOUT {key} n={len(self._zone_keepout[key])} "
+            f"escape={'on' if key in self._escape_keys else 'off'}"
         )
         self._publish_zone_keepout()
 
@@ -1096,12 +1274,36 @@ class MotionHelpers:
         if clear_maps:
             self.clear_costmaps(timeout=1.0)
 
+    def _base_xy_fast(self) -> Optional[Tuple[float, float]]:
+        """最新 base xy（map，非阻塞，失败就用上次缓存）。"""
+        for child in ("base_link", "base_footprint"):
+            try:
+                tf = self.tf_buffer.lookup_transform(
+                    "map", child, rclpy.time.Time(), timeout=Duration(seconds=0.0)
+                )
+            except Exception:  # noqa: BLE001
+                continue
+            t = tf.transform.translation
+            self._base_xy_cache = (float(t.x), float(t.y))
+            break
+        return self._base_xy_cache
+
     def _publish_zone_keepout(self) -> None:
         pts = []
+        base = self._base_xy_fast() if self._escape_keys else None
+        r2 = self._escape_r * self._escape_r
         for key, cloud in self._zone_keepout.items():
             if self._keepout_except is not None and key == self._keepout_except:
                 continue
-            pts.extend(cloud)
+            # 死区组：让开车身所在格（车被挤进死区时仍能规划出去）
+            if base is not None and key in self._escape_keys:
+                bx, by = base
+                pts.extend(
+                    p for p in cloud
+                    if (p[0] - bx) ** 2 + (p[1] - by) ** 2 > r2
+                )
+            else:
+                pts.extend(cloud)
         # Dropped cubes: never cleared by zone except (avoid re-crush on same pad)
         pts.extend(self._placed_keepout)
         header = Header()
