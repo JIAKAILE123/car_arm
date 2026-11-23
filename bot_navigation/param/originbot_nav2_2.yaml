@@ -90,8 +90,10 @@ controller_server:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
       xy_goal_tolerance: 0.32
-      # 到点勿死磕朝向；本地 FACE/DOCK 再细调
-      yaw_goal_tolerance: 0.85
+      # 0.85rad≈49°：以前到此为止，剩下的半圈全由任务层 snap 慢速补，
+      # 每次停两回转两回（"转过头再转一圈"）。现在让 DWB 用 0.95rad/s
+      # 自己收完到 0.30，snap 只做 ≤0.35 的微调。放街区靠另有 0.90 临时放宽。
+      yaw_goal_tolerance: 0.30
 
     # Line speed kept; yaw slowed — fast spin was skewing Nav / AMCL
     FollowPath:
@@ -121,7 +123,8 @@ controller_server:
       sim_granularity: 0.05
       angular_sim_granularity: 0.06
       xy_goal_tolerance: 0.34
-      yaw_goal_tolerance: 0.80
+      # 与 general_goal_checker 同步收紧（RotateToGoal 靠它判定何时原地收尾）
+      yaw_goal_tolerance: 0.30
       transform_tolerance: 0.3
       prune_plan: true
       prune_distance: 1.5
@@ -165,9 +168,14 @@ local_costmap:
       plugins: ["obstacle_layer", "denoise_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        # 恢复安全膨胀：防撞优先；卡死靠 recovery 倒车，不靠削薄墙
+        # 【2026-11-22 修“门口来回摩擦”】0.38 与内切半径(0.36+padding0.03=0.39) 冲突，
+        # 日志里每次都在报 "inflation radius (0.380) is smaller than the computed
+        # inscribed radius (0.390)" ⇒ 局部代价场没有梯度，DWB 只知道“撞/不撞”，
+        # 贴墙时全靠 253 死带硬判 ⇒ 在 (-3.8,-1.55) 贴着墙侧反复前进/倒车蹭。
+        # 抬到 0.55（>0.39，合法）后 DWB 有 0.39→0.55 的软代价，会主动离墙走。
+        # 253 死带宽度仍由内切半径决定 ⇒ 针眼/门洞的通行口径不变。
         cost_scaling_factor: 4.0
-        inflation_radius: 0.38
+        inflation_radius: 0.55
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -274,8 +282,18 @@ global_costmap:
         group_connectivity_type: 8
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 4.0
-        inflation_radius: 0.38
+        # 【2026-11-22 修“门口来回摩擦”】原来 radius=0.38 与 footprint 内切半径
+        # (0.36+padding0.02=0.38) 相等 ⇒ 膨胀层没有任何代价梯度，只有一条 0.38 厚的
+        # 253 死带；NavFn 只按最短几何找路，必然贴着竖墙北尖角 (-3.25,-0.70) 拐弯
+        # (离线复现最窄 clearance 仅 0.39m)。而车体是 0.74×0.80 矩形，绕尖角要
+        # sqrt(0.38²+0.40²)=0.55m ⇒ DWB 前进轨迹全判碰、只能倒车，下一周期再前进
+        # ⇒ 车在原地来回蹭 25s 直到看门狗 cancel(日志 20:38/21:00 两次都停在
+        # (-3.75,-1.53)/(-3.81,-1.56)，x 正好等于墙面 -3.375 减半车宽+padding)。
+        # 把半径抬到 0.80、scaling 降到 3.0 后：253 死带宽度不变(通行性/针眼口径不变)，
+        # 但 0.38→0.80 出现真梯度，规划器会走走廊中线。离线复算：最窄 clearance
+        # 0.39→0.65m(起点处)、全程均值 0.60→0.90m，绕尖角有余量，路径只长 1.9m。
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.80
       always_send_full_costmap: False
 
 map_server:

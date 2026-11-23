@@ -404,6 +404,17 @@ class MotionHelpers:
             time.sleep(0.3)
         return True
 
+    # 【2026-11-22 删除 MOUTH_AUTO 位置触发自动 ease】
+    # 曾经：车一进 x(-5.20~-1.35)×y(-4.50~1.45) 这个大盒子就自动 set_c_mouth_ease(True)。
+    # 三个问题，全部有日志/代码证据，所以整块撤掉（v104 里本来就没有它）：
+    # 1) 它由“位置”触发，与本腿是否真要过针眼无关 —— 只要在 C 区/方厅里挪车就中招；
+    # 2) ease 会把 footprint 从 0.74×0.80 缩成 0.62×0.66，DWB 以为车变小了 14cm，
+    #    于是“敢”贴着墙/门框走，真实车体在 Gazebo 里直接蹭上（= 来回摩擦的助燃剂）；
+    # 3) 每次 OFF 都把 inflation 恢复成 0.38 —— 会把 yaml 里新调好的膨胀参数在
+    #    运行期悄悄改回去，等于这处 yaml 修复永远不生效。
+    # 门洞/针眼现在靠两件事保证：yaml 里真梯度膨胀(全局0.80/local0.55)让规划避开
+    # 墙面，以及卡死后 UNSTICK 里显式的 ease（验证过能一把过针眼）。
+
     def navigate(
         self,
         x: float,
@@ -480,6 +491,8 @@ class MotionHelpers:
         # 不等 90s 超时，直接走脱困重试，单段止损从 ~3.5min 缩到 ~30s。
         best_d: Optional[float] = None
         best_t = t0
+        anchor = None  # 上一次被认可的“真的在走”的位置（绕行腿进展判定）
+        anchor_t = t0
         stalled = False
         poll_i = 0
         while not result_fut.done():
@@ -492,12 +505,30 @@ class MotionHelpers:
                 pos = self.get_base_xy_yaw_map()
                 if pos is not None:
                     dg = math.hypot(pos[0] - float(x), pos[1] - float(y))
+                    now = time.time()
                     if best_d is None or dg < best_d - 0.05:
-                        best_d, best_t = dg, time.time()
-                    elif (
+                        best_d, best_t = dg, now
+                        anchor, anchor_t = pos, now
+                    else:
+                        # 绕行腿（C 区→南口袋要绕 13~14m）前段必然远离目标，
+                        # 只看“离目标变近”会把健康腿在 25s 就判死、白白 UNSTICK
+                        # 盲退一次。补一条“真的在走”的判据：净位移 ≥0.75m 且
+                        # 均速 ≥0.15m/s。来回蹭（0.4m 往复、净位移不涨）和
+                        # 0.07m/s 的慢蹭（分母变大、速率永远上不去）都过不了。
+                        if anchor is None:
+                            anchor, anchor_t = pos, now
+                        moved = math.hypot(
+                            pos[0] - anchor[0], pos[1] - anchor[1]
+                        )
+                        if moved >= 0.75:
+                            rate = moved / max(1e-3, now - anchor_t)
+                            if rate >= 0.15:
+                                best_t = now
+                                anchor, anchor_t = pos, now
+                    if (
                         time.time() - best_t > 25.0
                         and dg > 1.0
-                        and best_d > 1.0
+                        and (best_d or 0.0) > 1.0
                     ):
                         self.node.get_logger().warn(
                             f"NAV_STALL {(time.time() - best_t):.0f}s 无进展 "
@@ -851,7 +882,9 @@ class MotionHelpers:
                 f"{name} → {value:.2f}"
                 + (f" (was {prev:.2f})" if prev is not None else "")
             )
-            return prev if prev is not None else 0.5
+            # get 读不到时以前回退 0.5（≈29°，正是"转过头再转一圈"的温床）；
+            # 现在与 yaml 的 FollowPath.yaw_goal_tolerance 0.30 保持一致。
+            return prev if prev is not None else 0.30
         except Exception as exc:  # noqa: BLE001
             self.node.get_logger().warn(f"yaw_tol set skipped: {exc}")
             return None
@@ -954,31 +987,43 @@ class MotionHelpers:
             if self._mouth_depth > 0:
                 return
         self._mouth_ease = bool(on)
+        # 【2026-11-22】恢复正常态时必须与 yaml 对齐：yaml 现在是
+        # global inflation 0.80 / scaling 3.0、local inflation 0.55 / scaling 4.0
+        # （原来这里硬写 0.38/4.0，每次 ease 结束都会把 yaml 的膨胀参数改回去）。
+        # ease 态 inflation 从 0.26 提到 0.36：0.26 < 内切 0.30 是非法配置，
+        # 日志每次切都在刷 "inflation radius (0.260) is smaller than the
+        # computed inscribed radius (0.300)"，膨胀层等于没有梯度。
         if on:
-            infl, scale = 0.26, 8.0
+            infl_l, scale_l = 0.36, 6.0
+            infl_g, scale_g = 0.36, 6.0
             pad_l, pad_g = 0.0, 0.0
             footprint = (
                 "[[0.32, 0.33], [0.32, -0.33], [-0.30, -0.33], [-0.30, 0.33]]"
             )
         else:
-            infl, scale = 0.38, 4.0
+            infl_l, scale_l = 0.55, 4.0
+            infl_g, scale_g = 0.80, 3.0
             pad_l, pad_g = 0.03, 0.02
             footprint = (
                 "[[0.38, 0.40], [0.38, -0.40], [-0.36, -0.40], [-0.36, 0.40]]"
             )
         local_n, global_n = self._costmap_param_nodes()
-        doubles = {
-            "inflation_layer.inflation_radius": infl,
-            "inflation_layer.cost_scaling_factor": scale,
-        }
         self._set_remote_params(
             local_n,
-            doubles={**doubles, "footprint_padding": pad_l},
+            doubles={
+                "inflation_layer.inflation_radius": infl_l,
+                "inflation_layer.cost_scaling_factor": scale_l,
+                "footprint_padding": pad_l,
+            },
             strings={"footprint": footprint},
         )
         self._set_remote_params(
             global_n,
-            doubles={**doubles, "footprint_padding": pad_g},
+            doubles={
+                "inflation_layer.inflation_radius": infl_g,
+                "inflation_layer.cost_scaling_factor": scale_g,
+                "footprint_padding": pad_g,
+            },
             strings={"footprint": footprint},
         )
         # NOTE: Humble collision_monitor 不 declare PolygonStop./PolygonCrawl.
@@ -1504,7 +1549,7 @@ class MotionHelpers:
         yaw: float,
         *,
         tol: float = 0.18,
-        max_wz: float = 0.55,
+        max_wz: float = 0.80,
         timeout: float = 5.0,
     ) -> bool:
         """In-place turn to a map yaw. Used when Nav2 stops XY-close but facing away."""
@@ -1572,11 +1617,13 @@ class MotionHelpers:
                     f"AIM_MAP_OK rem={rem:+.3f}rad (base_link +X → 物块)"
                 )
                 return True
-            # 近目标线性收速，避免 P×饱和拧过头再回摆
+            # 近目标线性收速，避免 P×饱和拧过头再回摆。
+            # 原 0.42·rem+0.03 只有 Nav2 原地转速的 1/3，snap 补 0.7rad 要
+            # 6s；提到 0.9·rem（实测 rem=0.7 时 ≈0.5-0.65rad/s）1.5s 收完。
             speed = min(
                 float(max_wz),
                 abs(float(yaw_gain) * rem),
-                max(0.05, 0.42 * abs(rem) + 0.03),
+                max(0.08, 0.9 * abs(rem)),
             )
             wz = float(math.copysign(speed, rem))
             self.node.get_logger().info(

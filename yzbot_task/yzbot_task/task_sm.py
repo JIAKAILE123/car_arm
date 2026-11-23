@@ -1162,9 +1162,11 @@ class TaskStateMachine(Node):
         red3_soft = str(color).lower() == "red" and int(cid) == 3
         red2 = str(color).lower() == "red" and int(cid) == 2
         yaw_tol = 0.45
-        # Nav2 只负责开到位置，不负责朝向（它的 yaw 容差 0.80，会转过头再回摆）。
-        # 位置一到就放手，由 snap_yaw_map 闭环转到 yaw_tol=0.25，再交给视觉。
-        early_yaw = 0.60
+        # Nav2 现在自己把朝向收到 0.30（yaml yaw_goal_tolerance 0.80→0.30，
+        # 它原地转 0.95rad/s 比任务层 snap 0.3rad/s 快 3 倍）。以前提前 0.60
+        # 放手等于把 Nav2 转到一半掐掉、再让 snap 慢速补转，就是"转过头再
+        # 转一圈"。early 只留 0.35 微调的活给 snap。
+        early_yaw = 0.35
         # All blue + all red: never drive across/over the cube (protects AMCL)
         use_safe = str(color).lower() in ("blue", "red")
         if use_safe:
@@ -1200,15 +1202,10 @@ class TaskStateMachine(Node):
                         self.motion.stop_chassis()
                         return True
             nav_ok = False
-            if str(color).lower() == "blue" and int(cid) == 4:
-                cur = self.motion.get_base_xy_yaw_map()
-                if cur is not None and -5.55 <= cur[0] <= -3.4 and -4.15 <= cur[1] < -2.35:
-                    # The C pad and its placed cargo sit between the base and
-                    # blue 4. Cross the room north of the pad before parking.
-                    if not self._navigate_passage(
-                        "C_PAD_BYPASS", [(-5.04, -2.07), (-7.35, -2.07)], math.pi
-                    ):
-                        return False
+            # blue_4 曾走 C_PAD_BYPASS 两个途经点+末段=三段（实测 27s）。
+            # 已放好的块本身有 PLACED_KEEPOUT 墙（r=0.30 lethal，块间距 0.30
+            # 圆与圆相接），全局规划一条路径就会自己从垫子端头绕过去，
+            # 一段直达 park。途经点反而把绕行拆成三次"停车-对朝向-起步"。
             if (
                 not nav_ok
                 and str(color).lower() == "blue"
@@ -2273,7 +2270,9 @@ class TaskStateMachine(Node):
                         self._pub_status(
                             f"ZONE_STICK_SOFT {hc}_{hid} → 未粘上"
                         )
-                self.motion.add_placed_keepout(tx_h, ty_h, radius=0.14)
+                # r=0.30：槽位间距 0.30，圆与圆相接成连续 lethal 墙，
+                # 全局规划只能从垫子端头绕（0.14 会留下 2cm 可钻缝）。
+                self.motion.add_placed_keepout(tx_h, ty_h, radius=0.30)
                 self.motion.set_keepout_except(None, clear_maps=False)
                 self._leave_zone_after_place(tx_h, ty_h)
 
@@ -2780,7 +2779,7 @@ class TaskStateMachine(Node):
                         f"ZONE_STICK_SOFT {color}_{cid} → 未粘上，靠 keepout"
                     )
             # Mark cube as permanent obstacle BEFORE leave/next nav (never drive over it)
-            self.motion.add_placed_keepout(tx, ty, radius=0.14)
+            self.motion.add_placed_keepout(tx, ty, radius=0.30)
             self.motion.set_keepout_except(None, clear_maps=False)
             # Reverse clear of pad so footprint is off the letter before planning
             self._leave_zone_after_place(tx, ty)
