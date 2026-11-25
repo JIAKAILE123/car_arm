@@ -89,7 +89,14 @@ controller_server:
     general_goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.32
+      # 容差必须 ≥0.34：取货 park 处局部膨胀 0.55 + 车身 footprint，
+      # DWB 物理上只能到 ~0.31m 外（上一局 0.308/0.312 两次都是 0.31 就判成功）。
+      # 0.32 太宽：起点/中途落进 0.32 时 Nav2 0.046s 就判 Reached、车一步没走，
+      # 任务层再判 POSE_GATE_FAIL → 原地转 → 0.14m/s CREEP 爬 5.5s。
+      # 0.22 太紧（2026-11-25 10:35 实测）：永远进不了 0.22 → Nav2 一直
+      # "想再挪一点点"，车原地画圈 72s（3 号块"一直转圈"）。
+      # 剩下的 0.31→贴块由任务层 CREEP 开环推进（它本就能压进膨胀区）。
+      xy_goal_tolerance: 0.34
       # 0.85rad≈49°：以前到此为止，剩下的半圈全由任务层 snap 慢速补，
       # 每次停两回转两回（"转过头再转一圈"）。现在让 DWB 用 0.95rad/s
       # 自己收完到 0.30，snap 只做 ≤0.35 的微调。放街区靠另有 0.90 临时放宽。
@@ -122,8 +129,10 @@ controller_server:
       sim_time: 1.6
       sim_granularity: 0.05
       angular_sim_granularity: 0.06
-      xy_goal_tolerance: 0.34
-      # 与 general_goal_checker 同步收紧（RotateToGoal 靠它判定何时原地收尾）
+      # 0.30：与 goal_checker 0.34 配套——DWB 在 0.30 就转正收尾，
+      # 让 ~0.31 的物理极限不再被硬顶（硬顶下去就是原地画圈）。
+      xy_goal_tolerance: 0.30
+      # 与 general_goal_checker 同步（RotateToGoal 靠它判定何时原地收尾）
       yaw_goal_tolerance: 0.30
       transform_tolerance: 0.3
       prune_plan: true

@@ -417,10 +417,11 @@ def approach_xy_for_cube(
             ax, ay = float(cx) + so5, float(cy)
             return ax, ay, _face(ax, ay)
 
-        # blue#4: park WEST (x−), face +X toward the cube.
+        # blue#4: park EAST (x+), face −X toward the cube. 来路本来就在东侧
+        # （C 区方向），不用先绕到方块西侧再拧过来，停完直行就能进抓取流程。
         if cid == 4:
             so4 = max(so_b, 0.70)
-            ax, ay = float(cx) - so4, float(cy)
+            ax, ay = float(cx) + so4, float(cy)
             return ax, ay, _face(ax, ay)
 
         # Park on the SAME side of the cube as the robot — never force west
@@ -444,11 +445,13 @@ def approach_xy_for_cube(
     so_r = max(float(standoff_m), 0.55)
     cid = int(cube_id)
 
-    # red#2：固定停在物块东侧同 y（map x=-4.5），车体与 x 轴平行、朝西正对块。
-    # 物块约 (-5.20, 0.00)；停 (-4.5, cy) → yaw=π（−X）。
+    # red#2：直接用「进 C 门途径点」当取货导航点（用户 2026-11-25 指定）。
+    # 该点就在 C 门洞里，物块约 (-5.20, 0.00) 在门内 1m 处，车头朝西
+    # （yaw=π，−X）正好对块；原来单独硬编码的 (-4.5, cy) 与它只差 0.27m，
+    # 现已合并成同一个点，其余逻辑不变。
     if cid == 2:
-        ax, ay = -4.5, float(cy)
-        return ax, ay, float(np.pi)
+        ax, ay = C_DOOR_VIA
+        return float(ax), float(ay), float(np.pi)
 
     # red#1 near blue#3 / zone A — park WEST.
     if cid == 1:
@@ -461,10 +464,13 @@ def approach_xy_for_cube(
         ax, ay = float(cx), float(cy) + 0.75
         return ax, ay, _face(ax, ay)
 
-    # red#4：东停朝西，第一次就对块
+    # red#4：西停朝东（用户 2026-11-25 指定）。原来停东侧，而车每次都从 C 区
+    # （西边）过来，直线路径正好穿过方块本体 → 车压着块开过去，视觉全程没
+    # 看到块（日志 CUBE_UNDER r=0.28 / SCAN_MAP MISS / VIS_FAIL）。改到 x 负
+    # 方向一侧、车头朝 +X 正对块，来路不再经过方块。
     if cid == 4:
         so4 = max(so_r, 0.58)
-        ax, ay = float(cx) + so4, float(cy)
+        ax, ay = float(cx) - so4, float(cy)
         return ax, ay, _face(ax, ay)
 
     if robot_xy is None:
@@ -570,6 +576,13 @@ _KNOWN_CUBES = {
     ("blue", 4): (-7.70, -3.00, 0.015),
     ("blue", 5): (-0.60, -8.30, 0.015),
 }
+
+# 进 C 门的固定途径点：车从东侧走廊进 C 区时先导航到这里
+# （task_sm._cross_c_door(entering=True) 用的就是这个点）。
+# 2026-11-25 用户要求：这个途径点与 red#2 的取货点差得不多，以后直接把它
+# 当作 red#2 的取货导航点，不再单独给 red#2 设停车点。
+C_DOOR_VIA = (-4.25, 0.10)
+
 
 def known_cube_xy(color: str, cube_id: int):
     """Map pose of numbered cube (must match Gazebo world)."""

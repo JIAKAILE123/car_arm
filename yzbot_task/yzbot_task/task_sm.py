@@ -59,6 +59,7 @@ from yzbot_task.vision_pose import (
     approach_xy_for_cube,
     diagnose_est_vs_known,
     joint1_from_blob,
+    C_DOOR_VIA,
 )
 from yzbot_task.moveit_arm import MoveItArm
 from yzbot_task.image_topics import resolve_image_topic
@@ -472,7 +473,10 @@ class TaskStateMachine(Node):
         miss = 0
         # 12s was mostly spent rocking in front of an unreachable slot; give up
         # early so the caller can re-dock instead of burning the clock.
-        deadline = time.monotonic() + 7.0
+        # 2026-11-25：实跑 6.45s 原地摇摆后仍失败重停靠（用户体感"原地停很久"），
+        # 缩到 4s；真值缺失走预测落点微调时更短（2.5s），再久也推不进去。
+        deadline = time.monotonic() + 4.0
+        pred_since = None
         try:
             while time.monotonic() < deadline:
                 cube = self._place_cube_xy(color, cid)
@@ -494,8 +498,18 @@ class TaskStateMachine(Node):
                                 f"在绿垫内（真值暂缺，直接放）"
                             )
                             return True
-                        # 预测也不在区内：用预测点当“块”继续微调，别抬臂放弃
+                        # 预测也不在区内：用预测点当“块”继续微调，别抬臂放弃。
+                        # 但预测落点推不进区就是推不进，最多再摇 2.5s 就交回上层
+                        # 重停靠（否则一直摇到 4s 超时，纯浪费时间）。
                         if pred is not None:
+                            if pred_since is None:
+                                pred_since = time.monotonic()
+                            elif time.monotonic() - pred_since > 2.5:
+                                self._pub_status(
+                                    f"PLACE_GATE_FAIL 预测落点=({pred[0]:.2f},{pred[1]:.2f}) "
+                                    f"2.5s 仍不在区内 → 重停靠"
+                                )
+                                return False
                             cube = pred
                             if miss == 8:
                                 self._pub_status(
@@ -1026,10 +1040,12 @@ class TaskStateMachine(Node):
                     early_xy_tol=0.30,
                 )
             if entering:
-                # 进 C 区但没给最终停靠点：进到门内一点就交回上层
+                # 进 C 区但没给最终停靠点：进到门内一点就交回上层。
+                # 这个点同时被当作 red#2 的取货导航点（vision_pose.C_DOOR_VIA），
+                # 两处共用同一常量，避免以后只改一边。
                 return self.motion.navigate(
-                    -4.25,
-                    0.10,
+                    C_DOOR_VIA[0],
+                    C_DOOR_VIA[1],
                     math.pi,
                     timeout=35.0,
                     behavior_tree=bt,
@@ -1248,6 +1264,7 @@ class TaskStateMachine(Node):
                     reanchor=True,
                     stay_if_xy=max(0.30, xy_tol * 1.4),
                     early_yaw_tol=early_yaw,
+                    early_xy_tol=xy_tol,
                     snap_yaw=True,
                 )
             if not nav_ok:
@@ -1297,6 +1314,7 @@ class TaskStateMachine(Node):
                 reanchor=True,
                 stay_if_xy=max(0.30, xy_tol * 1.4),
                 early_yaw_tol=early_yaw,
+                early_xy_tol=xy_tol,
                 snap_yaw=True,
             )
             if not nav_ok:
@@ -2821,8 +2839,12 @@ class TaskStateMachine(Node):
 
         从 ±X 接近时面对短边：不能停在短边外侧/贴边，要沿长边进到区内。
         """
-        # 长边(X)半长 0.5，留边 → ±0.40；短边(Y)半宽 0.25，留边 → ±0.14
-        if abs(float(fy) - float(zy)) > 0.14:
+        # 长边(X)半长 0.5，留边 → ±0.40；短边(Y)半宽 0.25
+        # 2026-11-25：短轴容差 0.14→0.17。物理上限 = 垫短边半宽 0.25 − 块半宽 0.075
+        # = 0.175（块整体仍在垫上），0.14 过度保守。按槽位分布（±0.17 槽 × 0.70
+        # 内收 = 离区心 0.119）时，0.14 只剩 2.1cm 余量，实跑 0.1405 就判失败 →
+        # "车都到区了还不放下、两次重试后放弃"。改 0.17 后同点通过且块心仍在垫内。
+        if abs(float(fy) - float(zy)) > 0.17:
             return False
         if abs(float(fx) - float(zx)) > 0.40:
             return False
@@ -2849,17 +2871,9 @@ class TaskStateMachine(Node):
         if cur is None:
             self._stop_place_vision_preview()
             return
-        rx, ry = float(cur[0]), float(cur[1])
-        from_west = (rx - (float(zx) - 0.1)) ** 2 <= (
-            rx - (float(zx) + 0.1)
-        ) ** 2
-        cands = [
-            (float(zx) - so, float(zy), 0.0),
-            (float(zx) + so, float(zy), math.pi),
-        ]
-        px, py, pyaw = min(
-            cands, key=lambda p: (p[0] - rx) ** 2 + (p[1] - ry) ** 2
-        )
+        # 停靠侧和 NAV_PLACE 用同一套选法（避开已放块 keepout），否则会出现
+        # "导航停在区东侧、DOCK 又按西侧算"的错位。
+        px, py, pyaw = self.motion.place_park_pick(float(zx), float(zy), so)
         from_west = abs(px - (float(zx) - so)) < abs(px - (float(zx) + so))
         self._pub_status(
             f"PLACE_DOCK 长边进区/短边对齐 → park=({px:.2f},{py:.2f}) "
@@ -2884,17 +2898,63 @@ class TaskStateMachine(Node):
                     )
                     return
 
-            # 到点后只原地对一次区，少转一点，避免拧过再拧回来。
+            # 2026-11-25：Nav2 停靠腿会提前 0.26m 停（NAV_EARLY_XY）且当时车头
+            # 还没转完（实测偏 107°/174°）。这里不再用"每轮先转头对准 park 再
+            # 直切"的迭代写法——残差只有 0.1~0.3m 时目标方位会来回翻 ~180°，
+            # 车头反复回摆（实测一轮放置白转 14s）。改成：先按 pyaw 摆正一次，
+            # 再在车体系里把 park 残差拆成"前向/侧向"两个标量各修一次，不迭代。
             c0 = self.motion.get_base_xy_yaw_map()
+            rem0 = 0.0
             if c0 is not None:
-                rem = self.motion._wrap_pi(pyaw - float(c0[2]))
-                if abs(rem) > 0.30:
-                    self._pub_status(
-                        f"PLACE_FACE 按实测朝向对区 {abs(rem)*180/math.pi:.0f}°"
+                rem0 = self.motion._wrap_pi(float(pyaw) - float(c0[2]))
+            if abs(rem0) > 0.30:
+                self._pub_status(
+                    f"PLACE_FACE 按实测朝向对区 {abs(rem0)*180/math.pi:.0f}°"
+                )
+                self.motion.snap_yaw_map(
+                    pyaw,
+                    tol=0.15,
+                    max_wz=0.85,
+                    timeout=min(6.0, abs(rem0) / 0.30 + 1.5),
+                )
+                self.motion.stop_chassis()
+                time.sleep(0.03)
+            cf = self.motion.get_base_xy_yaw_map()
+            if cf is not None:
+                ex = float(px) - float(cf[0])
+                ey = float(py) - float(cf[1])
+                cfwd = math.cos(float(pyaw))
+                sfwd = math.sin(float(pyaw))
+                d_fwd = ex * cfwd + ey * sfwd
+                d_lat = -ex * sfwd + ey * cfwd
+                self._pub_status(
+                    f"PLACE_FINE 前向{d_fwd:+.2f}m 侧向{d_lat:+.2f}m → 一次修正"
+                )
+                if abs(d_fwd) > 0.04:
+                    self.motion.drive_openloop_distance(
+                        max(-0.40, min(0.40, float(d_fwd))),
+                        vx=0.16,
+                        timeout=3.0,
                     )
+                    self.motion.stop_chassis()
+                    time.sleep(0.03)
+                if abs(d_lat) > 0.06:
+                    # 差速底盘没有横移：转 90° → 直行 → 转回 pyaw，一次修干净。
+                    side = math.copysign(math.pi / 2.0, float(d_lat))
                     self.motion.snap_yaw_map(
-                        pyaw, tol=0.25, max_wz=0.32,
-                        timeout=min(4.0, abs(rem) / 0.32 + 0.8),
+                        float(pyaw) + side,
+                        tol=0.12,
+                        max_wz=0.85,
+                        timeout=4.0,
+                    )
+                    self.motion.drive_openloop_distance(
+                        min(0.40, abs(float(d_lat))),
+                        vx=0.14,
+                        timeout=3.0,
+                    )
+                    self.motion.stop_chassis()
+                    self.motion.snap_yaw_map(
+                        float(pyaw), tol=0.12, max_wz=0.85, timeout=4.0
                     )
                     self.motion.stop_chassis()
                     time.sleep(0.03)

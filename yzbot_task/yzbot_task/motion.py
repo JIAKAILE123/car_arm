@@ -125,6 +125,8 @@ class MotionHelpers:
         # Virtual keepout over place pads so Nav2 routes around (avoid fly/crush)
         self._zone_keepout: dict = {}
         self._placed_keepout: list = []  # always-on marks for dropped cubes
+        # 已放块圆心（选放置停靠点时要避开，见 place_park_pick）
+        self._placed_centers: list = []
         self._keepout_except: Optional[str] = None
         # 死区（WALL_PINCH/EAST_PINCH/WALL_DIAG）：封住区域但绝不封住车自己站的格，
         # 否则车一旦 deviate/被障碍物挤进去，全局规划「起点在障碍里」→ 再也规划不出路径。
@@ -504,13 +506,17 @@ class MotionHelpers:
         poll_i = 0
         # 【零位移快速判据】去年 11-23 16:54 那次：NAV_ACCEPTED 后 25.4s 车一米
         # 没动，日志只有"一直有新路径"，最后走 25s 干等 + UNSTICK 盲退（用户看到
-        # 的"先不动，然后慢慢倒退"）。这里补两条：先 6s 判定"既不前进也不转"→
-        # 清图并重发同一目标（修一次性瞬态，如成本图里多了个假障碍格）；再来
-        # 6s 仍不动 → 立刻放弃走脱困，不让 25s 干等成为常态。
+        # 的"先不动，然后慢慢倒退"）。原实现是"6s 不动→清图重发→再等 6s→脱困"，
+        # 2026-11-25 实跑发现那第二轮 6s 基本白等（用户反馈"原地停很久才走"）：
+        # 命令一直在发而车零位移，属于物理卡死/打滑，清图重发救不回来，直接脱困。
         still_since = t0  # 既不位移也不转向的起始时刻
         last_pos = None
         last_yaw = 0.0
-        nomotion_retry = 0  # 0=未用阶梯 / 1=已清图重发过一次
+        # 【原地绕圈窗口】DWB 到不了 goal_checker 精度时会原地画圈（见循环内
+        # NAV_SPIN_HANDOVER / NAV_SPIN_STALL）。用"净位移 + 累计转角"识别。
+        spin_anchor = None
+        spin_t = t0
+        spin_rot = 0.0
         while not result_fut.done():
             if time.time() - t0 > timeout:
                 self.node.get_logger().error("nav result timeout")
@@ -555,48 +561,59 @@ class MotionHelpers:
                     )
                     if turned or moved_eps:
                         still_since = now
+                    # 【原地绕圈判据】2026-11-25 10:35 那局：3 号块前绕了 72s，
+                    # nav2 侧 36 次重规划、0 次 Reached/cancel/recovery。原因：
+                    # 取货 park 处局部膨胀把车物理上挡在 ~0.31m 外，而当时
+                    # goal_checker 收到 0.22，Nav2 永远"想再挪一点点"→ 原地画圈。
+                    # 此时 turned=True 会不断刷新 still_since（NAV_NOMOTION 失明），
+                    # NAV_STALL 又要求 dg>1.0（近目标失明）。补一条净位移判据：
+                    # 10s 内累计转角 ≥4rad（正常一次掉头 ≤π，不误伤）却几乎
+                    # 没挪窝 = 确实在画圈。
+                    if spin_anchor is None:
+                        spin_anchor, spin_t = pos, now
+                    elif last_pos is not None:
+                        spin_rot += abs(self._wrap_pi(pos[2] - last_yaw))
+                        if now - spin_t > 10.0:
+                            net = math.hypot(
+                                pos[0] - spin_anchor[0], pos[1] - spin_anchor[1]
+                            )
+                            if net < 0.15 and spin_rot > 4.0 and dg < 1.2:
+                                if dg <= 0.50:
+                                    # 已经很近：别再原地磨，交给任务层 CREEP 贴块
+                                    self.node.get_logger().warn(
+                                        f"NAV_SPIN_HANDOVER 原地绕圈 "
+                                        f"{now - spin_t:.1f}s 净位移 {net:.2f}m "
+                                        f"转角 {spin_rot:.1f}rad dg={dg:.2f} "
+                                        f"→ 已进可接受范围，交本地 CREEP 贴块"
+                                    )
+                                    self.cancel_nav()
+                                    self.stop_chassis()
+                                    self._nav_goal_handle = None
+                                    return True
+                                self.node.get_logger().warn(
+                                    f"NAV_SPIN_STALL 原地绕圈 "
+                                    f"{now - spin_t:.1f}s 净位移 {net:.2f}m "
+                                    f"转角 {spin_rot:.1f}rad dg={dg:.2f} "
+                                    f"{self._cmdvel_snapshot()} → cancel 走脱困重试"
+                                )
+                                stalled = True
+                                self.cancel_nav()
+                                self.clear_costmaps(timeout=0.8)
+                                self._publish_zone_keepout()
+                                break
+                            spin_anchor, spin_t, spin_rot = pos, now, 0.0
                     last_pos, last_yaw = pos, pos[2]
                     still_for = now - still_since
                     if still_for > 6.0 and dg > 0.6:
-                        if nomotion_retry == 0:
-                            nomotion_retry = 1
-                            self.node.get_logger().warn(
-                                f"NAV_NOMOTION {still_for:.1f}s 既不前进也不转 "
-                                f"@({pos[0]:.2f},{pos[1]:.2f}) dg={dg:.2f} "
-                                f"{self._cmdvel_snapshot()} → 清图并重发目标"
-                            )
-                            self.cancel_nav()
-                            time.sleep(0.35)
-                            self.clear_costmaps(timeout=0.8)
-                            self._publish_zone_keepout()
-                            resend = self.nav.send_goal_async(goal)
-                            if self._spin_until(resend, 5.0):
-                                gh2 = resend.result()
-                                if gh2 is not None and gh2.accepted:
-                                    goal_handle = gh2
-                                    self._nav_goal_handle = gh2
-                                    result_fut = gh2.get_result_async()
-                                    still_since = time.time()
-                                    last_pos = None
-                                    best_t = time.time()
-                                    self.node.get_logger().info(
-                                        "NAV_NOMOTION_RETRY 已清图+重发同一目标"
-                                    )
-                                    time.sleep(0.05)
-                                    continue
-                            self.node.get_logger().error(
-                                "NAV_NOMOTION 重发目标失败 → 交给脱困重试"
-                            )
-                            stalled = True
-                            self.cancel_nav()
-                            break
                         self.node.get_logger().warn(
-                            f"NAV_NOMOTION {still_for:.1f}s 二次零位移 "
+                            f"NAV_NOMOTION {still_for:.1f}s 既不前进也不转 "
                             f"@({pos[0]:.2f},{pos[1]:.2f}) dg={dg:.2f} "
-                            f"{self._cmdvel_snapshot()} → 放弃本段走脱困"
+                            f"{self._cmdvel_snapshot()} → 直接脱困（不再等第二轮 6s）"
                         )
                         stalled = True
                         self.cancel_nav()
+                        self.clear_costmaps(timeout=0.8)
+                        self._publish_zone_keepout()
                         break
                     if (
                         time.time() - best_t > 25.0
@@ -843,25 +860,24 @@ class MotionHelpers:
         rx = float(cur[0]) if cur is not None else float(x) - 1.0
         # Prefer ±X dock (same as PLACE_DOCK): base behind center, face toward it
         so = max(0.15, float(approach_standoff))
-        if from_east:
-            # 停在区的 x 正侧，车头朝西对区心，不再绕到西侧转身
-            gx, gy, yaw = float(x) + so, float(y), math.pi
-        else:
-            cands = [
-                (float(x) - so, float(y), 0.0),     # west of zone, face +X
-                (float(x) + so, float(y), math.pi),  # east of zone, face -X
-            ]
-            gx, gy, yaw = min(
-                cands, key=lambda p: (p[0] - rx) ** 2 + (p[1] - float(y)) ** 2
-            )
+        # 停靠侧选择：避开已放块 keepout（离车近但压住 keepout 的候选项会让
+        # 规划只送到 0.5m 外就报"到点"，后面 PLACE_CRAWL 修不动短轴）。
+        gx, gy, yaw = self.place_park_pick(
+            float(x), float(y), so, from_east=from_east
+        )
         if goal_yaw is not None:
             yaw = float(goal_yaw)
         self.node.get_logger().info(
             f"NAV_PLACE zone=({x:.2f},{y:.2f}) park=({gx:.2f},{gy:.2f}) "
             f"behind={so:.2f}m yaw={yaw:.2f} (区心在车前，不压区心)"
         )
-        # 位置到了就停。继续追朝向会在区前边走边拧，拧过再拧回来。
-        soft_early = max(0.22, float(xy_tol))
+        # 【2026-11-25】原来写 max(0.22, xy_tol)=0.26，实测车提前 0.26m 就退出
+        # （日志 NAV_EARLY_XY dxy=0.256≤0.26），而此时 DWB 的收尾 RotateToGoal
+        # 还没做，车头可能偏 107°/174° → 后面要原地拧 3~5s，拧不完就 AIM_MAP_FAIL
+        # → 重停靠，来回折腾 20s。改成 0.05（等于关闭早停）：让 Nav2 自己把
+        # xy 收到 goal_checker（0.34）并把朝向转到位，剩下的 0.3m 由
+        # PLACE_DOCK 的 PLACE_FINE 一次直行补上，比"提前停+原地拧"快且稳。
+        soft_early = 0.05
         dock_handoff = 0.82
         # 原来写 0.90（≈52°）是想"停靠别跟朝向较劲、后面再摆正"，但那个参数
         # 在 Humble 里根本没声明、从来没生效（真正生效的一直是 yaml 的 0.30）。
@@ -1193,9 +1209,15 @@ class MotionHelpers:
         reanchor: bool = True,
         stay_if_xy: Optional[float] = None,
         early_yaw_tol: Optional[float] = None,
+        early_xy_tol: Optional[float] = None,
         snap_yaw: bool = False,
     ) -> bool:
-        """Nav2 approach + TF pose gate (standard mobile-manipulator pattern)."""
+        """Nav2 approach + TF pose gate (standard mobile-manipulator pattern).
+
+        early_xy_tol: Nav2 早停阈值。默认沿用 stay_if_xy（历史行为）；取货腿
+        传入与 pose_gate 的 xy_tol 相同，避免"提前 0.1m 松手 → POSE_GATE_FAIL
+        → 原地转 → 再慢爬"的冗余对齐。
+        """
         attempts = max(int(retries), 0) + 1
         for i in range(attempts):
             if i > 0:
@@ -1229,7 +1251,9 @@ class MotionHelpers:
                 y,
                 yaw,
                 timeout=timeout,
-                early_xy_tol=stay_if_xy,
+                early_xy_tol=(
+                    stay_if_xy if early_xy_tol is None else float(early_xy_tol)
+                ),
                 early_yaw_tol=early_yaw_tol,
                 soft_start=True,
             ):
@@ -1376,6 +1400,7 @@ class MotionHelpers:
 
     def clear_placed_keepouts(self) -> None:
         self._placed_keepout = []
+        self._placed_centers = []
         self._publish_zone_keepout()
 
     def add_placed_keepout(
@@ -1396,11 +1421,51 @@ class MotionHelpers:
                 yi += s
             xi += s
         self._placed_keepout.extend(pts)
+        self._placed_centers.append((float(x), float(y)))
         self.node.get_logger().info(
             f"PLACED_KEEPOUT +({x:.2f},{y:.2f}) r={r:.2f} "
             f"n={len(self._placed_keepout)}"
         )
         self._publish_zone_keepout()
+
+    def place_park_pick(
+        self, x: float, y: float, so: float, *, from_east: bool = False
+    ) -> Tuple[float, float, float]:
+        """放置停靠点：±X 两候选里优先选离已放块 keepout 最远的那个。
+
+        4 号蓝那类情况：离车最近的候选点正好压在已放块的 keepout 里（实测距
+        已放块仅 0.12m），全局规划 BestEffort 0.80 会把车送到 0.5m 外就报
+        "到点"，而 PLACE_CRAWL 只修车头长轴，修不了短轴 → 预测落点在垫外 →
+        下放/收回循环。这里改成比"净空"，躲开被已放块围住的那一侧。
+        """
+        so = max(0.15, float(so))
+        if from_east:
+            return float(x) + so, float(y), math.pi
+        cands = [
+            (float(x) - so, float(y), 0.0),      # west of drop, face +X
+            (float(x) + so, float(y), math.pi),  # east of drop, face -X
+        ]
+        centers = list(getattr(self, "_placed_centers", []))
+        cur = self.get_base_xy_yaw_map()
+        rx = float(cur[0]) if cur is not None else 0.0
+        ry = float(cur[1]) if cur is not None else float(y)
+
+        def _clear(p) -> float:
+            if not centers:
+                return 9.0
+            return min(
+                math.hypot(p[0] - float(cx), p[1] - float(cy))
+                for cx, cy in centers
+            )
+
+        # 净空大 0.10m 以上才算"明显更好"，否则仍按离车近的来（省时间）。
+        best = max(cands, key=_clear)
+        if _clear(best) - min(_clear(p) for p in cands) < 0.10:
+            return min(
+                cands,
+                key=lambda p: (p[0] - rx) ** 2 + (p[1] - ry) ** 2,
+            )
+        return best
 
     def set_keepout_except(self, zone: Optional[str], *, clear_maps: bool = True) -> None:
         """Exclude one letter pad while docking; placed-cube marks stay always on."""
