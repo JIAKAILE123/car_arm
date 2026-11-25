@@ -435,6 +435,7 @@ class MotionHelpers:
         early_yaw_tol: Optional[float] = None,
         soft_start: bool = False,
         behavior_tree: str = "",
+        pre_align: bool = True,
         _retry: int = 1,
     ) -> bool:
         if self.drive_owner != "nav":
@@ -449,6 +450,29 @@ class MotionHelpers:
         else:
             self.stop_chassis()
             time.sleep(0.06)
+
+        # 【起手对齐】DWB 在「目标方位与当前朝向夹角 >120°」时没有好轨迹可选：
+        # 实测 48% 采样是 vx=-0.55 满速倒车（倒车上限只有正向的 1/5），或 wz=0.95
+        # 原地磨 7~18s、以 r≈0.86m 绕目标画两整圈（2026-11-25 12:22 局 354s，
+        # 导航占 218s）。发目标前先自己原地快转到"目标方位"，代价 2~4s、省 10~20s。
+        # 门洞喉口（x -5.6~-3.0, y -1.6~1.6）内不做：那里原地转 0.55m 扫掠会蹭墙。
+        if pre_align and not soft_start:
+            cur = self.get_base_xy_yaw_map()
+            if cur is not None:
+                cx, cy, cyaw = float(cur[0]), float(cur[1]), float(cur[2])
+                d_goal = math.hypot(float(x) - cx, float(y) - cy)
+                in_throat = (-5.6 <= cx <= -3.0) and (-1.6 <= cy <= 1.6)
+                if d_goal > 1.2 and not in_throat:
+                    bearing = math.atan2(float(y) - cy, float(x) - cx)
+                    err0 = float(self._wrap_pi(bearing - cyaw))
+                    if abs(err0) > 1.2:
+                        self.node.get_logger().info(
+                            f"NAV_PREALIGN d={d_goal:.2f}m err={err0:+.2f}rad "
+                            f"→ 起手原地转到 bearing={bearing:+.2f}"
+                        )
+                        self.snap_yaw_map(
+                            bearing, tol=0.20, max_wz=0.85, timeout=6.0
+                        )
 
         pose = PoseStamped()
         pose.header.frame_id = "map"
@@ -2092,8 +2116,8 @@ class MotionHelpers:
         cube_id: int,
         *,
         target_range: float = 0.42,
-        max_vx: float = 0.14,
-        max_wz: float = 0.22,
+        max_vx: float = 0.24,
+        max_wz: float = 0.34,
         timeout: float = 12.0,
     ) -> bool:
         """Face known cube map XY, then drive forward until range ≤ target_range.
@@ -2150,10 +2174,12 @@ class MotionHelpers:
                 self.node.get_logger().info(f"CREEP_OK already r={rng0:.2f}m")
             return True
         if rem0 is not None and abs(rem0) > 0.12:
+            # 2026-11-25：原来 wz 上限硬压 0.16、增益 0.75，实测 0.24rad 要磨
+            # 2.6s；放到 0.26/0.95 后同一角度约 1.0s。
             self.aim_yaw_to_bearing(
                 float(rem0),
-                yaw_gain=0.75,
-                max_wz=min(float(max_wz), 0.16),
+                yaw_gain=0.95,
+                max_wz=min(float(max_wz), 0.26),
                 tol=0.08,
                 timeout=min(8.0, abs(rem0) / max(max_wz, 0.08) + 1.5),
                 bearing_fn=lambda: (_rng_yaw()[1]),

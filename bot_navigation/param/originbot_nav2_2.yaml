@@ -111,22 +111,26 @@ controller_server:
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
       debug_trajectory_details: False
-      # 倒车限幅：过大容易在墙边倒着撞
-      min_vel_x: -0.55
+      # 不再允许 DWB 倒车当前进：实测 48% 采样是 vx=-0.55 满速倒车，
+      # 而倒车限速只有正向(2.7)的 1/5 → 整腿只有 0.55m/s；且贴墙倒车易撞。
+      # 需要倒车脱困时由任务层 drive_openloop_distance(负距离) / UNSTICK 盲退负责。
+      min_vel_x: 0.0
       min_vel_y: 0.0
       max_vel_x: 2.7
       max_vel_y: 0.0
-      # 墙边/杆端转弯需要够用的角速度，只比原来略低
-      max_vel_theta: 0.95
+      # 角速度必须与 velocity_smoother 完全一致！原来这里 0.95 而 smoother 只放 0.62，
+      # DWB 规划出的弧线实际转不过来 → 反复重规划、绕目标两整圈、原地磨。（2026-11-25 实测）
+      # 0.85 是任务层 AIM_MAP wz=-0.850 已长期验证可用的安全值。
+      max_vel_theta: 0.85
       min_speed_xy: 0.0
       max_speed_xy: 2.7
       min_speed_theta: 0.0
       acc_lim_x: 2.4
       acc_lim_y: 0.0
-      acc_lim_theta: 1.35
+      acc_lim_theta: 1.15
       decel_lim_x: -2.4
       decel_lim_y: 0.0
-      decel_lim_theta: -1.35
+      decel_lim_theta: -1.15
       vx_samples: 20
       vy_samples: 1
       vtheta_samples: 28
@@ -394,14 +398,17 @@ waypoint_follower:
 velocity_smoother:
   ros__parameters:
     use_sim_time: True
-    # High smoother rate + soft accel = silk; yaw still capped for AMCL
+    # High smoother rate + soft accel = silk.
+    # ！！wz 三个限幅必须与 DWB 的 max_vel_theta/acc_lim_theta/decel_lim_theta 一致！！
+    # 原来 yaw 上限只放 0.62、加速度只放 0.58（DWB 假设 0.95/1.35），DWB 用错误模型
+    # 规划弧线 → 实际欠转 → 绕圈/原地磨；现与 DWB 统一为 0.85/1.15。（2026-11-25 实测定位）
     smoothing_frequency: 20.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [2.7, 0.0, 0.62]
-    min_velocity: [-0.55, 0.0, -0.80]
-    max_accel: [2.4, 0.0, 0.58]
-    max_decel: [-2.4, 0.0, -0.58]
+    max_velocity: [2.7, 0.0, 0.85]
+    min_velocity: [-0.10, 0.0, -0.85]
+    max_accel: [2.4, 0.0, 1.15]
+    max_decel: [-2.4, 0.0, -1.15]
     odom_topic: "odometry/filtered"
     odom_duration: 0.12
     deadband_velocity: [0.0, 0.0, 0.0]

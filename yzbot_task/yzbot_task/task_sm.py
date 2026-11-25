@@ -1423,8 +1423,10 @@ class TaskStateMachine(Node):
                     color,
                     cid,
                     target_range=creep_r,
-                    max_vx=0.18,
-                    max_wz=0.14,
+                    # 2026-11-25：0.18/0.14 时 0.32m 要磨 5.5s（含 2.6s 摆正），
+                    # 提到 0.26/0.30 后同样距离约 2.5s（末段 scale 0.5 仍有 0.13）
+                    max_vx=0.26,
+                    max_wz=0.30,
                     timeout=8.0,
                 ):
                     return True
@@ -2954,34 +2956,64 @@ class TaskStateMachine(Node):
                 self._pub_status(
                     f"PLACE_FINE 前向{d_fwd:+.2f}m 侧向{d_lat:+.2f}m → 一次修正"
                 )
-                if abs(d_fwd) > 0.04:
-                    self.motion.drive_openloop_distance(
-                        max(-0.40, min(0.40, float(d_fwd))),
-                        vx=0.16,
-                        timeout=3.0,
-                    )
-                    self.motion.stop_chassis()
-                    time.sleep(0.03)
-                if abs(d_lat) > 0.06:
-                    # 差速底盘没有横移：转 90° → 直行 → 转回 pyaw，一次修干净。
-                    side = math.copysign(math.pi / 2.0, float(d_lat))
-                    self.motion.snap_yaw_map(
-                        float(pyaw) + side,
-                        tol=0.12,
-                        max_wz=0.85,
-                        timeout=4.0,
-                    )
-                    self.motion.drive_openloop_distance(
-                        min(0.40, abs(float(d_lat))),
-                        vx=0.14,
-                        timeout=3.0,
-                    )
-                    self.motion.stop_chassis()
-                    self.motion.snap_yaw_map(
-                        float(pyaw), tol=0.12, max_wz=0.85, timeout=4.0
-                    )
-                    self.motion.stop_chassis()
-                    time.sleep(0.03)
+                # 2026-11-25：原来是"先直行修前向、再转 90° 横移、再转回 pyaw"，
+                # 两次 90° 转向实测每次约 3.2s（四块合计 41s），车上看着就是原地
+                # 转圈。改成一次对角修正：把残差合成一条斜边，转 δ 直行过去再转回，
+                # 总转角 = 2|δ|（典型 30~50°，纯横移才退回 ±90°），少转一大半。
+                d_fwd = float(max(-0.40, min(0.40, float(d_fwd))))
+                d_lat = float(max(-0.40, min(0.40, float(d_lat))))
+                if math.hypot(d_fwd, d_lat) > 0.06:
+                    if abs(d_fwd) >= 0.06:
+                        # 前向分量够大：前向/倒车两种斜切，取总转角小的那侧
+                        ang = (
+                            math.atan2(d_lat, d_fwd)
+                            if d_fwd > 0.0
+                            else math.atan2(-d_lat, -d_fwd)
+                        )
+                        dist = math.hypot(d_fwd, d_lat)
+                        if d_fwd < 0.0:
+                            dist = -dist
+                        self._pub_status(
+                            f"PLACE_FINE 斜切{ang*180/math.pi:+.0f}° "
+                            f"直行{dist:+.2f}m（一次修正）"
+                        )
+                        self.motion.snap_yaw_map(
+                            float(self.motion._wrap_pi(float(pyaw) + ang)),
+                            tol=0.10,
+                            max_wz=0.85,
+                            timeout=4.0,
+                        )
+                        self.motion.drive_openloop_distance(
+                            float(max(-0.45, min(0.45, dist))),
+                            vx=0.20,
+                            timeout=3.0,
+                        )
+                        self.motion.stop_chassis()
+                        self.motion.snap_yaw_map(
+                            float(pyaw), tol=0.10, max_wz=0.85, timeout=4.0
+                        )
+                        self.motion.stop_chassis()
+                        time.sleep(0.03)
+                    else:
+                        # 前向分量≈0：只能横移，差速底盘没有横移，转 90° → 直行 → 转回
+                        side = math.copysign(math.pi / 2.0, float(d_lat))
+                        self.motion.snap_yaw_map(
+                            float(self.motion._wrap_pi(float(pyaw) + side)),
+                            tol=0.12,
+                            max_wz=0.85,
+                            timeout=4.0,
+                        )
+                        self.motion.drive_openloop_distance(
+                            min(0.40, abs(float(d_lat))),
+                            vx=0.16,
+                            timeout=3.0,
+                        )
+                        self.motion.stop_chassis()
+                        self.motion.snap_yaw_map(
+                            float(pyaw), tol=0.12, max_wz=0.85, timeout=4.0
+                        )
+                        self.motion.stop_chassis()
+                        time.sleep(0.03)
 
             # 朝向已经对着区，才沿车头短走一段。已经在区内就停，不再顶出区。
             c1 = self.motion.get_base_xy_yaw_map()
