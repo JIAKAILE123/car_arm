@@ -311,70 +311,6 @@
       },
       "foxglovePanelTitle": "识别画面（相机）"
     },
-    "Image!vis": {
-      "cameraState": {
-        "distance": 20,
-        "perspective": true,
-        "phi": 60,
-        "target": [
-          0,
-          0,
-          0
-        ],
-        "targetOffset": [
-          0,
-          0,
-          0
-        ],
-        "targetOrientation": [
-          0,
-          0,
-          0,
-          1
-        ],
-        "thetaOffset": 45,
-        "fovy": 45,
-        "near": 0.5,
-        "far": 5000
-      },
-      "followMode": "follow-pose",
-      "scene": {},
-      "transforms": {},
-      "topics": {
-        "/scan": {
-          "visible": false,
-          "colorField": "intensity",
-          "colorMode": "colormap",
-          "colorMap": "turbo"
-        },
-        "/robot_description": {
-          "visible": false
-        },
-        "/camera_rgbd/camera_rgbd/points": {
-          "visible": false
-        }
-      },
-      "layers": {},
-      "publish": {
-        "type": "point",
-        "poseTopic": "/move_base_simple/goal",
-        "pointTopic": "/clicked_point",
-        "poseEstimateTopic": "/initialpose",
-        "poseEstimateXDeviation": 0.5,
-        "poseEstimateYDeviation": 0.5,
-        "poseEstimateThetaDeviation": 0.26179939
-      },
-      "imageMode": {
-        "imageTopic": "/yzbot/vision_debug",
-        "calibrationTopic": "",
-        "synchronize": false,
-        "rotation": 0,
-        "flipHorizontal": false,
-        "flipVertical": false,
-        "annotations": {}
-      },
-      "foxglovePanelTitle": "识别画面（识别）"
-    },
     "3D!1juc55f": {
       "cameraState": {
         "perspective": true,
@@ -904,27 +840,27 @@
   },
   "layout": {
     "direction": "column",
-    "splitPercentage": 14,
+    "splitPercentage": 13,
     "first": {
       "direction": "row",
-      "splitPercentage": 18,
+      "splitPercentage": 16,
       "first": "RawMessages!seed",
       "second": {
         "direction": "row",
-        "splitPercentage": 56.1,
+        "splitPercentage": 57.14,
         "first": "RawMessages!calc",
         "second": "RawMessages!rule"
       }
     },
     "second": {
       "direction": "column",
-      "splitPercentage": 76,
+      "splitPercentage": 80,
       "first": {
         "direction": "row",
-        "splitPercentage": 72,
+        "splitPercentage": 74,
         "first": {
           "direction": "column",
-          "splitPercentage": 20,
+          "splitPercentage": 16,
           "first": {
             "direction": "row",
             "splitPercentage": 25,
@@ -943,13 +879,8 @@
           },
           "second": {
             "direction": "column",
-            "splitPercentage": 40,
-            "first": {
-              "direction": "row",
-              "splitPercentage": 50,
-              "first": "Image!cam",
-              "second": "Image!vis"
-            },
+            "splitPercentage": 26.19,
+            "first": "Image!cam",
             "second": "3D!1juc55f"
           }
         },
