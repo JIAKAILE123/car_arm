@@ -599,7 +599,23 @@ class TaskStateMachine(Node):
             # 不再用 inside/outside 成对途经点（会被当成死锚点拉回去），但
             # 也不能从远处一个目标直接穿门：门洞外还有 dyn_obs_3 在 x=-2 扫，
             # 一条长路径要在门口同时躲杆+过门，实测会卡在门外 1.5m 进不来。
-            # 折中：门外先单独穿到门内一点（单目标），再导航到区旁停靠点。
+            #
+            # 【2026-11-25】原来"先穿门到门内点 → 停车 → 关 ease → 开 ease →
+            # 再重新规划到停靠点"，日志实测每块都是两次独立导航：
+            #   C_MOUTH ease ON → NAV (-4.25,0.10) → NAV_EARLY_XY dxy=0.392
+            #   → ease OFF → ease ON → NAV park → ease OFF
+            # 到途经点先刹停、重设膨胀/footprint、从零起速，白丢 1.6~2s + 一次
+            # 加减速（用户："到途径点又要重新规划再提速，太慢了"）。
+            # 【2026-11-25 定稿：一次连续通行这条路走不通，已放弃】
+            # 试过"门内点当 NavigateThroughPoses 的途经点、和停靠点一起下发"
+            # 一次连续走完（BT 里带 RemovePassedGoals 0.43），指望它"过了就删"。
+            # 实测 12:06 那局：NAV_THROUGH continuous (-4.25,0.10) → (-5.71,-2.90)
+            # 之后 60s 在门口来回走，最后 nav_through result timeout（补测 d=2.46m）
+            # 才回退两段式。原因就是上面说的死锚点：planner 绕门框走时车身离门内点
+            # 有 0.3~0.5m，RemovePassedGoals(0.43) 不触发，每次重规划又掉头回去补点，
+            # 表现就是用户说的"又想进途经点、又想去停靠点，来回走"。
+            # ⇒ 保留两段式（每块多 ~1.6s，但不会 60s 卡死）；提速改由 keepout 0.22
+            #   + soft_early 0.28 交接承担（实测进垫腿已从 0.11 m/s 回到 0.31→0.65 m/s）。
             cur = self.motion.get_base_xy_yaw_map()
             if cur is not None and not self._on_c_room_side(cur[0], cur[1]):
                 self._pub_status("NAV_C 门外 → 先穿门到门内点")
@@ -2303,9 +2319,14 @@ class TaskStateMachine(Node):
                         self._pub_status(
                             f"ZONE_STICK_SOFT {hc}_{hid} → 未粘上"
                         )
-                # r=0.30：槽位间距 0.30，圆与圆相接成连续 lethal 墙，
-                # 全局规划只能从垫子端头绕（0.14 会留下 2cm 可钻缝）。
-                self.motion.add_placed_keepout(tx_h, ty_h, radius=0.30)
+                # 【2026-11-25】r 0.30 → 0.22：槽位间距只有 0.26~0.35，2r=0.44
+                # 仍然远大于间距，圆与圆照样相接成连续 lethal 墙，全局规划依旧
+                # 只能从垫子端头绕（v105 的性质不退化）。但 r=0.30 时后面几块的
+                # 停靠点距已放块圆心只剩 0.62~0.65m，减掉 r 和车长 0.32 后净空
+                # 只有 0~3cm（red#2 甚至是 -0.14m）⇒ DWB 的 footprint 根本进不去，
+                # 车在垫前原地磨/绕圈 24s（实测 24.5s 只走 1.56m），最后靠
+                # goal_checker 的 0.34 容差"算到"。缩到 0.22 给停靠点腾出 8cm。
+                self.motion.add_placed_keepout(tx_h, ty_h, radius=0.22)
                 self.motion.set_keepout_except(None, clear_maps=False)
                 self._leave_zone_after_place(tx_h, ty_h)
 
@@ -2812,7 +2833,10 @@ class TaskStateMachine(Node):
                         f"ZONE_STICK_SOFT {color}_{cid} → 未粘上，靠 keepout"
                     )
             # Mark cube as permanent obstacle BEFORE leave/next nav (never drive over it)
-            self.motion.add_placed_keepout(tx, ty, radius=0.30)
+            # 【2026-11-25】r 0.30 → 0.22，理由同 STEP 里那处：0.30 时后续停靠点
+            # 距已放块圆心只剩 0.62~0.65m，扣掉 r 和车长后净空 0~3cm，DWB 进不去
+            # 只能在垫前原地磨；2r=0.44 仍大于槽位间距，keepout 墙照样连续。
+            self.motion.add_placed_keepout(tx, ty, radius=0.22)
             self.motion.set_keepout_except(None, clear_maps=False)
             # Reverse clear of pad so footprint is off the letter before planning
             self._leave_zone_after_place(tx, ty)

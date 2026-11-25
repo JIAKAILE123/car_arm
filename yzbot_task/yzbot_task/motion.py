@@ -517,6 +517,16 @@ class MotionHelpers:
         spin_anchor = None
         spin_t = t0
         spin_rot = 0.0
+        # 【速度自证】2026-11-25 12:00 那局：C 垫前最后 1.56m 走了 24.5s
+        # （0.064 m/s），nav2 侧零 recovery 零 cancel、只有 0.3Hz 重规划，
+        # 光看 nav2 日志分不清"龟速爬"还是"原地转一圈再走"。这里每 2s 打一行
+        # 位姿+指令速度，下一局直接看 NAV_SPEED 就知道是 vx 上不去还是 wz 在打转。
+        tele_last = t0
+        # 【朝收尾预算】早停判据要求 xy 到位且 yaw 到位。实测到点后 xy 早就
+        # 好了、只剩朝向时，Nav2 会围绕目标"边挪边转"磨 5~10s（5.4s 走
+        # 0.21m、9.8s 走 0.48m），还容易绕成一圈。这里给 3s 预算，超了就把
+        # 收尾交给任务层的 snap_yaw_map（0.80rad/s 单调转，不再挪窝）。
+        xy_ok_since: Optional[float] = None
         while not result_fut.done():
             if time.time() - t0 > timeout:
                 self.node.get_logger().error("nav result timeout")
@@ -531,6 +541,13 @@ class MotionHelpers:
                     if best_d is None or dg < best_d - 0.05:
                         best_d, best_t = dg, now
                         anchor, anchor_t = pos, now
+                    if now - tele_last >= 2.0:
+                        tele_last = now
+                        self.node.get_logger().info(
+                            f"NAV_SPEED t={now - t0:.1f}s "
+                            f"@({pos[0]:.2f},{pos[1]:.2f},yaw={pos[2]:.2f}) "
+                            f"dxy={dg:.2f} {self._cmdvel_snapshot()}"
+                        )
                     else:
                         # 绕行腿（C 区→南口袋要绕 13~14m）前段必然远离目标，
                         # 只看“离目标变近”会把健康腿在 25s 就判死、白白 UNSTICK
@@ -637,7 +654,28 @@ class MotionHelpers:
                         if early_yaw_tol is not None:
                             dyaw = abs(self._wrap_pi(float(cur[2]) - float(yaw)))
                             if dyaw > float(early_yaw_tol):
-                                # 位置到了但朝向未好：让 Nav2 继续边挪边转，不抢 cmd_vel
+                                # 位置到了但朝向未好：先让 Nav2 自己边挪边转
+                                # （不抢 cmd_vel），但只给 3s 预算——实测它在
+                                # 终点收朝向要 5~10s，还会围着目标绕圈。
+                                if xy_ok_since is None:
+                                    xy_ok_since = time.time()
+                                    self.node.get_logger().info(
+                                        f"NAV_XY_OK_YAW_WAIT dxy={dxy:.3f} "
+                                        f"dyaw={dyaw:.3f} → 位置已到，"
+                                        f"交给 Nav2 收朝向（最多 3s）"
+                                    )
+                                elif time.time() - xy_ok_since > 3.0:
+                                    self.node.get_logger().warn(
+                                        f"NAV_XY_YAW_HANDOVER 收朝向 "
+                                        f"{time.time() - xy_ok_since:.1f}s 仍未到 "
+                                        f"dyaw={dyaw:.2f}"
+                                        f"（tol {float(early_yaw_tol):.2f}）"
+                                        f" → 交任务层原地快转（不再绕圈）"
+                                    )
+                                    self.cancel_nav()
+                                    self.stop_chassis()
+                                    self._nav_goal_handle = None
+                                    return True
                                 time.sleep(0.05)
                                 continue
                             self.node.get_logger().info(
@@ -655,6 +693,7 @@ class MotionHelpers:
                             time.sleep(0.02)
                         self._nav_goal_handle = None
                         return True
+                    xy_ok_since = None
             time.sleep(0.05)
         self._nav_goal_handle = None
         from action_msgs.msg import GoalStatus
@@ -871,13 +910,12 @@ class MotionHelpers:
             f"NAV_PLACE zone=({x:.2f},{y:.2f}) park=({gx:.2f},{gy:.2f}) "
             f"behind={so:.2f}m yaw={yaw:.2f} (区心在车前，不压区心)"
         )
-        # 【2026-11-25】原来写 max(0.22, xy_tol)=0.26，实测车提前 0.26m 就退出
-        # （日志 NAV_EARLY_XY dxy=0.256≤0.26），而此时 DWB 的收尾 RotateToGoal
-        # 还没做，车头可能偏 107°/174° → 后面要原地拧 3~5s，拧不完就 AIM_MAP_FAIL
-        # → 重停靠，来回折腾 20s。改成 0.05（等于关闭早停）：让 Nav2 自己把
-        # xy 收到 goal_checker（0.34）并把朝向转到位，剩下的 0.3m 由
-        # PLACE_DOCK 的 PLACE_FINE 一次直行补上，比"提前停+原地拧"快且稳。
-        soft_early = 0.05
+        # 【2026-11-25】0.05（等于关闭早停）在 C 垫旁反而更慢：停靠点距已放块
+        # keepout 只剩 0~3cm 净空时 DWB 根本挤不进去，实测以 0.11 m/s 磨 24.5s
+        # 只走 1.56m，最后靠 goal_checker 0.34 容差"算到"。改成 0.28 早停交接：
+        # Nav2 只管走到附近，最后 ≤0.4m 残差由 PLACE_DOCK/PLACE_FINE 一次直行+
+        # 原地摆正补上（v106 已实测 0.39m 残差一次修完，比死等快得多）。
+        soft_early = 0.28
         dock_handoff = 0.82
         # 原来写 0.90（≈52°）是想"停靠别跟朝向较劲、后面再摆正"，但那个参数
         # 在 Humble 里根本没声明、从来没生效（真正生效的一直是 yaml 的 0.30）。

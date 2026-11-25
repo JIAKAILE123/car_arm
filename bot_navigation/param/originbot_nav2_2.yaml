@@ -87,7 +87,12 @@ controller_server:
       movement_time_allowance: 14.0
 
     general_goal_checker:
-      stateful: True
+      # 【2026-11-25】原来是 True：一旦满足过就永远判成功。实测日志里
+      # `Reached the goal!` 之后任务层立刻测到 dxy=0.443/0.308 —— 车被
+      # 膨胀/障碍推走 0.1~0.44m 仍算"到了"，任务层再判 POSE_GATE_FAIL →
+      # 原地转 → 重新发导航，白丢 5~10s（用户说的"到点附近又转一圈"）。
+      # 改 False：必须"当下"落在容差内才算到，Nav2 会自己补最后那一下。
+      stateful: False
       plugin: "nav2_controller::SimpleGoalChecker"
       # 容差必须 ≥0.34：取货 park 处局部膨胀 0.55 + 车身 footprint，
       # DWB 物理上只能到 ~0.31m 外（上一局 0.308/0.312 两次都是 0.31 就判成功）。
@@ -129,9 +134,12 @@ controller_server:
       sim_time: 1.6
       sim_granularity: 0.05
       angular_sim_granularity: 0.06
-      # 0.30：与 goal_checker 0.34 配套——DWB 在 0.30 就转正收尾，
-      # 让 ~0.31 的物理极限不再被硬顶（硬顶下去就是原地画圈）。
-      xy_goal_tolerance: 0.30
+      # 【2026-11-25】0.30 → 0.34，与 goal_checker 齐平。
+      # 0.30 时 RotateToGoal 要等车进 0.30 才起效，但该处（取货 park /
+      # C 垫旁）物理极限就是 ~0.31m，永远进不去 → 车在目标外"进入-退出"
+      # 反复绕圈（实测 5.4s 只走 0.21m、9.8s 只走 0.48m）。抬到 0.34 后
+      # 只要 BT 判"xy 到了"，DWB 就立刻原地把朝向收完，不再绕。
+      xy_goal_tolerance: 0.34
       # 与 general_goal_checker 同步（RotateToGoal 靠它判定何时原地收尾）
       yaw_goal_tolerance: 0.30
       transform_tolerance: 0.3
