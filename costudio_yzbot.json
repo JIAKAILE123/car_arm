@@ -1,5 +1,380 @@
 {
   "configById": {
+    "RawMessages!seed": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/viz/seed.data",
+      "fontSize": 30,
+      "foxglovePanelTitle": "题目种子"
+    },
+    "RawMessages!calc": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/viz/question.data",
+      "fontSize": 20,
+      "foxglovePanelTitle": "计算题目"
+    },
+    "RawMessages!rule": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/viz/mapping_rule.data",
+      "fontSize": 17,
+      "foxglovePanelTitle": "规则题目"
+    },
+    "Indicator!rnum": {
+      "path": "/viz/red_count.data",
+      "style": "background",
+      "fontSize": 48,
+      "fallbackColor": "#9e9e9e",
+      "fallbackLabel": "待解析",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "0",
+          "color": "#e66974",
+          "label": "0"
+        },
+        {
+          "operator": "=",
+          "rawValue": "1",
+          "color": "#e66974",
+          "label": "1"
+        },
+        {
+          "operator": "=",
+          "rawValue": "2",
+          "color": "#e66974",
+          "label": "2"
+        },
+        {
+          "operator": "=",
+          "rawValue": "3",
+          "color": "#e66974",
+          "label": "3"
+        },
+        {
+          "operator": "=",
+          "rawValue": "4",
+          "color": "#e66974",
+          "label": "4"
+        },
+        {
+          "operator": "=",
+          "rawValue": "5",
+          "color": "#e66974",
+          "label": "5"
+        },
+        {
+          "operator": "=",
+          "rawValue": "6",
+          "color": "#e66974",
+          "label": "6"
+        },
+        {
+          "operator": "=",
+          "rawValue": "7",
+          "color": "#e66974",
+          "label": "7"
+        },
+        {
+          "operator": "=",
+          "rawValue": "8",
+          "color": "#e66974",
+          "label": "8"
+        },
+        {
+          "operator": "=",
+          "rawValue": "9",
+          "color": "#e66974",
+          "label": "9"
+        },
+        {
+          "operator": "=",
+          "rawValue": "10",
+          "color": "#e66974",
+          "label": "10"
+        }
+      ],
+      "foxglovePanelTitle": "红色数量"
+    },
+    "Indicator!rzone": {
+      "path": "/viz/red_zone.data",
+      "style": "background",
+      "fontSize": 26,
+      "fallbackColor": "#9e9e9e",
+      "fallbackLabel": "待映射",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "红色 → A区",
+          "color": "#e6a88d",
+          "label": "红色 → A区"
+        },
+        {
+          "operator": "=",
+          "rawValue": "红色 → B区",
+          "color": "#e6a88d",
+          "label": "红色 → B区"
+        },
+        {
+          "operator": "=",
+          "rawValue": "红色 → C区",
+          "color": "#e6a88d",
+          "label": "红色 → C区"
+        },
+        {
+          "operator": "=",
+          "rawValue": "红色 → 待映射",
+          "color": "#e6a88d",
+          "label": "红色 → 待映射"
+        }
+      ],
+      "foxglovePanelTitle": "红色区域"
+    },
+    "Indicator!bnum": {
+      "path": "/viz/blue_count.data",
+      "style": "background",
+      "fontSize": 48,
+      "fallbackColor": "#9e9e9e",
+      "fallbackLabel": "待解析",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "0",
+          "color": "#4a7fc1",
+          "label": "0"
+        },
+        {
+          "operator": "=",
+          "rawValue": "1",
+          "color": "#4a7fc1",
+          "label": "1"
+        },
+        {
+          "operator": "=",
+          "rawValue": "2",
+          "color": "#4a7fc1",
+          "label": "2"
+        },
+        {
+          "operator": "=",
+          "rawValue": "3",
+          "color": "#4a7fc1",
+          "label": "3"
+        },
+        {
+          "operator": "=",
+          "rawValue": "4",
+          "color": "#4a7fc1",
+          "label": "4"
+        },
+        {
+          "operator": "=",
+          "rawValue": "5",
+          "color": "#4a7fc1",
+          "label": "5"
+        },
+        {
+          "operator": "=",
+          "rawValue": "6",
+          "color": "#4a7fc1",
+          "label": "6"
+        },
+        {
+          "operator": "=",
+          "rawValue": "7",
+          "color": "#4a7fc1",
+          "label": "7"
+        },
+        {
+          "operator": "=",
+          "rawValue": "8",
+          "color": "#4a7fc1",
+          "label": "8"
+        },
+        {
+          "operator": "=",
+          "rawValue": "9",
+          "color": "#4a7fc1",
+          "label": "9"
+        },
+        {
+          "operator": "=",
+          "rawValue": "10",
+          "color": "#4a7fc1",
+          "label": "10"
+        }
+      ],
+      "foxglovePanelTitle": "蓝色数量"
+    },
+    "Indicator!bzone": {
+      "path": "/viz/blue_zone.data",
+      "style": "background",
+      "fontSize": 26,
+      "fallbackColor": "#9e9e9e",
+      "fallbackLabel": "待映射",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "蓝色 → A区",
+          "color": "#8fbfdf",
+          "label": "蓝色 → A区"
+        },
+        {
+          "operator": "=",
+          "rawValue": "蓝色 → B区",
+          "color": "#8fbfdf",
+          "label": "蓝色 → B区"
+        },
+        {
+          "operator": "=",
+          "rawValue": "蓝色 → C区",
+          "color": "#8fbfdf",
+          "label": "蓝色 → C区"
+        },
+        {
+          "operator": "=",
+          "rawValue": "蓝色 → 待映射",
+          "color": "#8fbfdf",
+          "label": "蓝色 → 待映射"
+        }
+      ],
+      "foxglovePanelTitle": "蓝色区域"
+    },
+    "Image!cam": {
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 45,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {
+        "/scan": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/robot_description": {
+          "visible": false
+        },
+        "/camera_rgbd/camera_rgbd/points": {
+          "visible": false
+        }
+      },
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {
+        "imageTopic": "/camera/image_raw",
+        "calibrationTopic": "/camera/camera_info",
+        "synchronize": false,
+        "rotation": 0,
+        "flipHorizontal": false,
+        "flipVertical": false,
+        "annotations": {}
+      },
+      "foxglovePanelTitle": "识别画面（相机）"
+    },
+    "Image!vis": {
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 45,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {
+        "/scan": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/robot_description": {
+          "visible": false
+        },
+        "/camera_rgbd/camera_rgbd/points": {
+          "visible": false
+        }
+      },
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {
+        "imageTopic": "/yzbot/vision_debug",
+        "calibrationTopic": "",
+        "synchronize": false,
+        "rotation": 0,
+        "flipHorizontal": false,
+        "flipVertical": false,
+        "annotations": {}
+      },
+      "foxglovePanelTitle": "识别画面（识别）"
+    },
     "3D!1juc55f": {
       "cameraState": {
         "perspective": true,
@@ -32,7 +407,8 @@
         "transforms": {
           "editable": false,
           "showLabel": false
-        }
+        },
+        "backgroundColor": "#ffffff"
       },
       "transforms": {
         "frame:odom": {
@@ -98,7 +474,7 @@
           "visible": false
         },
         "/scan": {
-          "visible": false,
+          "visible": true,
           "colorField": "range",
           "colorMode": "gradient",
           "colorMap": "turbo",
@@ -132,7 +508,7 @@
           "visible": false
         },
         "/move_base_simple/goal": {
-          "visible": true
+          "visible": false
         },
         "/initialpose": {
           "visible": false
@@ -169,7 +545,8 @@
         "/plan": {
           "visible": true,
           "lineWidth": 0.205,
-          "type": "line"
+          "type": "line",
+          "color": "#f6c50f"
         },
         "/plan_smoothed": {
           "visible": true
@@ -196,7 +573,7 @@
           "colorMap": "turbo"
         },
         "/goal_pose": {
-          "visible": true
+          "visible": false
         },
         "/global_costmap/voxel_marked_cloud": {
           "visible": false
@@ -208,13 +585,13 @@
           "visible": false
         },
         "/global_costmap/costmap": {
-          "visible": true
+          "visible": false
         },
         "/downsampled_costmap": {
           "visible": false
         },
         "/transformed_global_plan": {
-          "visible": true
+          "visible": false
         }
       },
       "layers": {
@@ -270,400 +647,280 @@
         "poseEstimateThetaDeviation": 0.26179939
       },
       "imageMode": {},
-      "foxglovePanelTitle": "3D状态显示"
+      "foxglovePanelTitle": "三维（移动路径）"
     },
-    "Publish!20rffgt": {
-      "buttonText": "提交题目→大模型解题",
-      "buttonTooltip": "只改引号里的中文题干，外面 { \"data\": \"...\" } 不要删。点提交 → /exam_question。官方出题在 6-Exam 终端输入参数（比赛模式 11470507）。",
-      "advancedView": true,
-      "value": "{\n  \"data\": \"5个红色物块，去A区\"\n}",
-      "foxglovePanelTitle": "②粘贴题目解题（只改引号内文字）",
-      "topicName": "/exam_question",
-      "datatype": "std_msgs/String"
-    },
-    "Image!1p1fyg9": {
-      "cameraState": {
-        "distance": 20,
-        "perspective": true,
-        "phi": 60,
-        "target": [
-          0,
-          0,
-          0
-        ],
-        "targetOffset": [
-          0,
-          0,
-          0
-        ],
-        "targetOrientation": [
-          0,
-          0,
-          0,
-          1
-        ],
-        "thetaOffset": 45,
-        "fovy": 45,
-        "near": 0.5,
-        "far": 5000
-      },
-      "followMode": "follow-pose",
-      "scene": {},
-      "transforms": {},
-      "topics": {
-        "/scan": {
-          "visible": false,
-          "colorField": "intensity",
-          "colorMode": "colormap",
-          "colorMap": "turbo"
-        },
-        "/robot_description": {
-          "visible": false
-        },
-        "/camera_rgbd/camera_rgbd/points": {
-          "visible": false
-        }
-      },
-      "layers": {},
-      "publish": {
-        "type": "point",
-        "poseTopic": "/move_base_simple/goal",
-        "pointTopic": "/clicked_point",
-        "poseEstimateTopic": "/initialpose",
-        "poseEstimateXDeviation": 0.5,
-        "poseEstimateYDeviation": 0.5,
-        "poseEstimateThetaDeviation": 0.26179939
-      },
-      "imageMode": {
-        "imageTopic": "/camera/image_raw",
-        "calibrationTopic": "/camera/camera_info",
-        "synchronize": false,
-        "rotation": 0
-      },
-      "foxglovePanelTitle": "前视相机"
-    },
-    "Indicator!3c2k9pj": {
-      "path": "/color.data",
-      "style": "bulb",
+    "Indicator!prog": {
+      "path": "/viz/progress_n.data",
+      "style": "background",
       "fontSize": 40,
-      "fallbackColor": "#a0a0a0",
-      "fallbackLabel": "待命",
+      "fallbackColor": "#9e9e9e",
+      "fallbackLabel": "未开始",
       "rules": [
         {
           "operator": "=",
           "rawValue": "0",
-          "color": "#6eebdd",
-          "label": "蓝色货物"
+          "color": "#f6ec09",
+          "label": "第0个"
         },
         {
           "operator": "=",
           "rawValue": "1",
-          "color": "#e35e4b",
-          "label": "红色货物"
-        }
-      ],
-      "foxglovePanelTitle": "目标颜色"
-    },
-    "Indicator!s4663u": {
-      "path": "/task.data",
-      "style": "background",
-      "fontSize": 40,
-      "fallbackColor": "#d6f2cf",
-      "fallbackLabel": "待命",
-      "rules": [
-        {
-          "operator": "=",
-          "rawValue": "0",
-          "color": "#94ef7b",
-          "label": "蓝色货物任务"
+          "color": "#f6ec09",
+          "label": "第1个"
         },
         {
           "operator": "=",
-          "rawValue": "1",
-          "color": "#94ef7b",
-          "label": "红色货物任务"
-        }
-      ],
-      "foxglovePanelTitle": "当前任务"
-    },
-    "Indicator!2lw9qd9": {
-      "path": "/pick.data",
-      "style": "background",
-      "fontSize": 40,
-      "fallbackColor": "#80c9d2",
-      "fallbackLabel": "待命",
-      "rules": [
-        {
-          "operator": "=",
-          "rawValue": "0",
-          "color": "#68e24a",
-          "label": "抓取完成"
+          "rawValue": "2",
+          "color": "#f6ec09",
+          "label": "第2个"
         },
         {
           "operator": "=",
-          "rawValue": "1",
-          "color": "#6ee0d3",
-          "label": "放置完成"
+          "rawValue": "3",
+          "color": "#f6ec09",
+          "label": "第3个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "4",
+          "color": "#f6ec09",
+          "label": "第4个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "5",
+          "color": "#f6ec09",
+          "label": "第5个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "6",
+          "color": "#f6ec09",
+          "label": "第6个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "7",
+          "color": "#f6ec09",
+          "label": "第7个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "8",
+          "color": "#f6ec09",
+          "label": "第8个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "9",
+          "color": "#f6ec09",
+          "label": "第9个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "10",
+          "color": "#f6ec09",
+          "label": "第10个"
         }
       ],
-      "foxglovePanelTitle": "末端状态"
+      "foxglovePanelTitle": "任务进度"
     },
-    "Indicator!3cv0og": {
-      "path": "/cur.data",
+    "Indicator!taskphase": {
+      "path": "/viz/task_phase.data",
       "style": "background",
-      "fontSize": 40,
-      "fallbackColor": "#adb2d6",
+      "fontSize": 26,
+      "fallbackColor": "#9e9e9e",
       "fallbackLabel": "系统待机",
       "rules": [
         {
           "operator": "=",
-          "rawValue": "0",
-          "color": "#68e24a",
+          "rawValue": "系统待机",
+          "color": "#8f43f5",
           "label": "系统待机"
         },
         {
           "operator": "=",
-          "rawValue": "1",
-          "color": "#6ee0d3",
+          "rawValue": "大模型解题中",
+          "color": "#8f43f5",
+          "label": "大模型解题中"
+        },
+        {
+          "operator": "=",
+          "rawValue": "任务就绪",
+          "color": "#8f43f5",
+          "label": "任务就绪"
+        },
+        {
+          "operator": "=",
+          "rawValue": "前往取货点",
+          "color": "#8f43f5",
           "label": "前往取货点"
         },
         {
           "operator": "=",
-          "rawValue": "2",
-          "color": "#f0c14b",
-          "label": "识别与抓取"
+          "rawValue": "识别并抓取",
+          "color": "#8f43f5",
+          "label": "识别并抓取"
         },
         {
           "operator": "=",
-          "rawValue": "3",
-          "color": "#6e9beb",
+          "rawValue": "运往放置区",
+          "color": "#8f43f5",
           "label": "运往放置区"
+        },
+        {
+          "operator": "=",
+          "rawValue": "本轮完成",
+          "color": "#8f43f5",
+          "label": "本轮完成"
         }
       ],
-      "foxglovePanelTitle": "作业阶段"
+      "foxglovePanelTitle": "当前任务"
     },
-    "RawMessages!11wl317": {
+    "Indicator!eestate": {
+      "path": "/viz/ee_state.data",
+      "style": "background",
+      "fontSize": 30,
+      "fallbackColor": "#9e9e9e",
+      "fallbackLabel": "未夹取物块",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "未夹取物块",
+          "color": "#63d54a",
+          "label": "未夹取物块"
+        },
+        {
+          "operator": "=",
+          "rawValue": "移动中",
+          "color": "#63d54a",
+          "label": "移动中"
+        },
+        {
+          "operator": "=",
+          "rawValue": "夹取中",
+          "color": "#63d54a",
+          "label": "夹取中"
+        },
+        {
+          "operator": "=",
+          "rawValue": "放置中",
+          "color": "#63d54a",
+          "label": "放置中"
+        },
+        {
+          "operator": "=",
+          "rawValue": "已释放",
+          "color": "#63d54a",
+          "label": "已释放"
+        }
+      ],
+      "foxglovePanelTitle": "状态"
+    },
+    "Publish!start": {
+      "topicName": "/task_start",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "开始任务",
+      "buttonTooltip": "用上一题重新解题并下发任务指令",
+      "buttonColor": "",
+      "advancedView": true,
+      "value": "{\n  \"data\": \"go\"\n}",
+      "foxglovePanelTitle": "开始任务"
+    },
+    "RawMessages!exammode": {
       "diffEnabled": false,
       "diffMethod": "custom",
       "diffTopicPath": "",
       "showFullMessageForDiff": false,
-      "topicPath": "/chat.data",
-      "fontSize": 24,
-      "foxglovePanelTitle": "任务总览"
-    },
-    "RawMessages!viz_q": {
-      "diffEnabled": false,
-      "diffMethod": "custom",
-      "diffTopicPath": "",
-      "showFullMessageForDiff": false,
-      "topicPath": "/viz/question.data",
-      "fontSize": 26,
-      "foxglovePanelTitle": "任务题目"
-    },
-    "RawMessages!viz_c": {
-      "diffEnabled": false,
-      "diffMethod": "custom",
-      "diffTopicPath": "",
-      "showFullMessageForDiff": false,
-      "topicPath": "/viz/counts.data",
+      "topicPath": "/viz/exam_mode.data",
       "fontSize": 22,
-      "foxglovePanelTitle": "颜色数量与放置区"
+      "foxglovePanelTitle": "出题模式"
     },
-    "RawMessages!viz_o": {
-      "diffEnabled": false,
-      "diffMethod": "custom",
-      "diffTopicPath": "",
-      "showFullMessageForDiff": false,
-      "topicPath": "/viz/grasp_order.data",
-      "fontSize": 24,
-      "foxglovePanelTitle": "抓取顺序"
+    "Publish!rulein": {
+      "topicName": "/mapping_rule_text",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "应用映射规则",
+      "buttonTooltip": "把裁判给的映射规则原文粘到这里再点按钮",
+      "buttonColor": "",
+      "advancedView": true,
+      "value": "{\n  \"data\": \"x 代表红色,y 代表蓝色;数值大于等于 3 的去 A 区,其他颜色去 C 区\"\n}",
+      "foxglovePanelTitle": "映射规则输入（可粘贴）"
     },
-    "RawMessages!viz_p": {
-      "diffEnabled": false,
-      "diffMethod": "custom",
-      "diffTopicPath": "",
-      "showFullMessageForDiff": false,
-      "topicPath": "/viz/progress.data",
-      "fontSize": 24,
-      "foxglovePanelTitle": "任务进度"
+    "Publish!argin": {
+      "topicName": "/exam_arg",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "按此参数出题",
+      "buttonTooltip": "比赛模式填 11470507；练习模式清空后点按钮",
+      "buttonColor": "",
+      "advancedView": true,
+      "value": "{\n  \"data\": \"11470507\"\n}",
+      "foxglovePanelTitle": "出题参数输入（比赛模式）"
     },
-    "RawMessages!viz_w": {
-      "diffEnabled": false,
-      "diffMethod": "custom",
-      "diffTopicPath": "",
-      "showFullMessageForDiff": false,
-      "topicPath": "/viz/work_state.data",
-      "fontSize": 24,
-      "foxglovePanelTitle": "工作状态"
+    "Publish!qin": {
+      "topicName": "/panel_exam_question",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "应用题目",
+      "buttonTooltip": "可把出题程序输出的题目原文粘到这里",
+      "buttonColor": "",
+      "advancedView": true,
+      "value": "{\n  \"data\": \"\"\n}",
+      "foxglovePanelTitle": "题目输入（可粘贴）"
     },
-    "RawMessages!viz_t": {
-      "diffEnabled": false,
-      "diffMethod": "custom",
-      "diffTopicPath": "",
-      "showFullMessageForDiff": false,
-      "topicPath": "/viz/elapsed.data",
-      "fontSize": 28,
-      "foxglovePanelTitle": "【测试】总用时"
-    },
-    "RawMessages!viz_map": {
-      "diffEnabled": false,
-      "diffMethod": "custom",
-      "diffTopicPath": "",
-      "showFullMessageForDiff": false,
-      "topicPath": "/viz/mapping_rule.data",
-      "fontSize": 20,
-      "foxglovePanelTitle": "映射规则①"
-    },
-    "Indicator!red_n": {
-      "path": "/viz/red_count.data",
-      "style": "background",
-      "fontSize": 48,
-      "fallbackColor": "#eb6774",
-      "fallbackLabel": "-",
-      "rules": [
-        {
-          "operator": "=",
-          "rawValue": "0",
-          "color": "#eb6774",
-          "label": "0"
-        },
-        {
-          "operator": "=",
-          "rawValue": "1",
-          "color": "#eb6774",
-          "label": "1"
-        },
-        {
-          "operator": "=",
-          "rawValue": "2",
-          "color": "#eb6774",
-          "label": "2"
-        },
-        {
-          "operator": "=",
-          "rawValue": "3",
-          "color": "#eb6774",
-          "label": "3"
-        },
-        {
-          "operator": "=",
-          "rawValue": "4",
-          "color": "#eb6774",
-          "label": "4"
-        },
-        {
-          "operator": "=",
-          "rawValue": "5",
-          "color": "#eb6774",
-          "label": "5"
-        }
-      ],
-      "foxglovePanelTitle": "红色数量"
-    },
-    "Indicator!blue_n": {
-      "path": "/viz/blue_count.data",
-      "style": "background",
-      "fontSize": 48,
-      "fallbackColor": "#2b5def",
-      "fallbackLabel": "-",
-      "rules": [
-        {
-          "operator": "=",
-          "rawValue": "0",
-          "color": "#2b5def",
-          "label": "0"
-        },
-        {
-          "operator": "=",
-          "rawValue": "1",
-          "color": "#2b5def",
-          "label": "1"
-        },
-        {
-          "operator": "=",
-          "rawValue": "2",
-          "color": "#2b5def",
-          "label": "2"
-        },
-        {
-          "operator": "=",
-          "rawValue": "3",
-          "color": "#2b5def",
-          "label": "3"
-        },
-        {
-          "operator": "=",
-          "rawValue": "4",
-          "color": "#2b5def",
-          "label": "4"
-        },
-        {
-          "operator": "=",
-          "rawValue": "5",
-          "color": "#2b5def",
-          "label": "5"
-        }
-      ],
-      "foxglovePanelTitle": "蓝色数量"
-    },
-    "RawMessages!red_z": {
-      "diffEnabled": false,
-      "diffMethod": "custom",
-      "diffTopicPath": "",
-      "showFullMessageForDiff": false,
-      "topicPath": "/viz/red_zone.data",
-      "fontSize": 28,
-      "foxglovePanelTitle": "红色去向"
-    },
-    "RawMessages!blue_z": {
-      "diffEnabled": false,
-      "diffMethod": "custom",
-      "diffTopicPath": "",
-      "showFullMessageForDiff": false,
-      "topicPath": "/viz/blue_zone.data",
-      "fontSize": 28,
-      "foxglovePanelTitle": "蓝色去向"
+    "Publish!seedin": {
+      "topicName": "/exam_seed",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "记录种子",
+      "buttonTooltip": "把「使用种子: N」里的 N 填在这里（仅显示用）",
+      "buttonColor": "",
+      "advancedView": true,
+      "value": "{\n  \"data\": \"\"\n}",
+      "foxglovePanelTitle": "题目种子输入"
     }
   },
   "globalVariables": {
-    "globalVariable": 0
+    "globalVariable": {}
   },
   "userNodes": {},
   "playbackConfig": {
     "speed": 1
   },
   "layout": {
-    "direction": "row",
-    "splitPercentage": 52,
+    "direction": "column",
+    "splitPercentage": 14,
     "first": {
-      "direction": "column",
-      "splitPercentage": 78,
-      "first": "3D!1juc55f",
-      "second": "Image!1p1fyg9"
+      "direction": "row",
+      "splitPercentage": 18,
+      "first": "RawMessages!seed",
+      "second": {
+        "direction": "row",
+        "splitPercentage": 56.1,
+        "first": "RawMessages!calc",
+        "second": "RawMessages!rule"
+      }
     },
     "second": {
       "direction": "column",
-      "splitPercentage": 14,
-      "first": "Publish!20rffgt",
-      "second": {
-        "direction": "column",
-        "splitPercentage": 18,
-        "first": "RawMessages!viz_map",
-        "second": {
+      "splitPercentage": 76,
+      "first": {
+        "direction": "row",
+        "splitPercentage": 72,
+        "first": {
           "direction": "column",
-          "splitPercentage": 28,
+          "splitPercentage": 20,
           "first": {
-            "direction": "column",
-            "splitPercentage": 50,
-            "first": {
-              "direction": "row",
-              "first": "Indicator!red_n",
-              "second": "Indicator!blue_n"
-            },
+            "direction": "row",
+            "splitPercentage": 25,
+            "first": "Indicator!rnum",
             "second": {
               "direction": "row",
-              "first": "RawMessages!red_z",
-              "second": "RawMessages!blue_z"
+              "splitPercentage": 33.33,
+              "first": "Indicator!rzone",
+              "second": {
+                "direction": "row",
+                "splitPercentage": 50,
+                "first": "Indicator!bnum",
+                "second": "Indicator!bzone"
+              }
             }
           },
           "second": {
@@ -671,40 +928,47 @@
             "splitPercentage": 40,
             "first": {
               "direction": "row",
-              "first": "RawMessages!viz_q",
-              "second": "RawMessages!viz_c"
+              "splitPercentage": 50,
+              "first": "Image!cam",
+              "second": "Image!vis"
             },
+            "second": "3D!1juc55f"
+          }
+        },
+        "second": {
+          "direction": "column",
+          "splitPercentage": 25,
+          "first": "Indicator!prog",
+          "second": {
+            "direction": "column",
+            "splitPercentage": 33.33,
+            "first": "Indicator!taskphase",
             "second": {
               "direction": "column",
-              "splitPercentage": 45,
-              "first": {
-                "direction": "row",
-                "first": "RawMessages!viz_o",
-                "second": "RawMessages!viz_p"
-              },
-              "second": {
-                "direction": "column",
-                "splitPercentage": 35,
-                "first": {
-                  "direction": "row",
-                  "first": "RawMessages!viz_t",
-                  "second": "RawMessages!viz_w"
-                },
-                "second": {
-                  "direction": "column",
-                  "splitPercentage": 50,
-                  "first": {
-                    "direction": "row",
-                    "first": "Indicator!3c2k9pj",
-                    "second": "Indicator!s4663u"
-                  },
-                  "second": {
-                    "direction": "row",
-                    "first": "Indicator!2lw9qd9",
-                    "second": "Indicator!3cv0og"
-                  }
-                }
-              }
+              "splitPercentage": 50,
+              "first": "Indicator!eestate",
+              "second": "Publish!start"
+            }
+          }
+        }
+      },
+      "second": {
+        "direction": "row",
+        "splitPercentage": 17.14,
+        "first": "RawMessages!exammode",
+        "second": {
+          "direction": "row",
+          "splitPercentage": 28.74,
+          "first": "Publish!rulein",
+          "second": {
+            "direction": "row",
+            "splitPercentage": 32.26,
+            "first": "Publish!argin",
+            "second": {
+              "direction": "row",
+              "splitPercentage": 59.52,
+              "first": "Publish!qin",
+              "second": "Publish!seedin"
             }
           }
         }

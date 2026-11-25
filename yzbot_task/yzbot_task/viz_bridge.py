@@ -1,27 +1,35 @@
 """coStudio 可视化桥：把内部状态转成赛场正式用语（不上屏调试词）。
 
-评分面板话题：
-  /viz/question      当前任务题目
-  /viz/grasp_order   抓取顺序
-  /viz/counts        资源数量与放置区（含映射规则）
-  /viz/mapping_rule  赛前映射规则原文
+赛场面板（对齐评分表：序号2 指令解析 / 序号6 状态反馈）：
+【指令解析】
+  /viz/seed          题目种子（官方出题 bin 的「使用种子」行）
+  /viz/question      计算题目（题目正文，已去掉「题目:」前缀）
+  /viz/mapping_rule  规则题目（赛前映射规则原文）
   /viz/red_count     红色数量 Int32（x）
+  /viz/red_zone      红色区域 如「红色 → A区」
   /viz/blue_count    蓝色数量 Int32（y）
-  /viz/red_zone      红色放置区文案 如「红色 → A区」
-  /viz/blue_zone     蓝色放置区文案
-  /viz/progress      任务进度
-  /viz/work_state    当前工作状态
-  /viz/elapsed       【测试用】总用时（赛前可 -p show_elapsed:=false）
-  /chat              任务总览
+  /viz/blue_zone     蓝色区域
+【状态反馈】
+  /viz/progress      任务进度（正计数 0/N → N/N）
+  /viz/current_task  当前任务（第 i/N 件：颜色货物#编号 → X区）
+  /viz/work_state    当前状态
+  移动路径：coStudio 3D 面板（/plan + /local_plan + 实时轨迹）
+【辅助，默认不上正式布局】
+  /viz/grasp_order   抓取顺序
+  /viz/counts        指令解析汇总（多行）
+  /viz/elapsed       【练习用】总用时（赛场 -p show_elapsed:=false）
 
-指示灯 Int32（/topic.data）：
+指示灯 Int32（/topic.data，练习布局用）：
   /color  0=蓝色目标 1=红色目标
   /task   0=蓝色任务 1=红色任务
   /pick   0=抓取完成 1=放置完成
   /cur    0=待机 1=前往取货 2=抓取作业 3=前往放置
 
-默认映射规则①：
-  x=红色，y=蓝色；数量≥3 → A区，否则 → C区
+映射规则（国赛三条，赛前裁判三选一，由 llm_solver 的 rule_id/rule_text 决定）：
+  ① x=红、y=蓝；数量≥3→A区，否则→C区
+  ② 数值≥3 者为红、否则蓝；x→B区、y→A区
+  ③ 数值大者蓝、小者红；蓝→B区、红→C区
+  /mapping_rule_text  接收当前生效规则原文（latched），驱动本面板与红蓝数量/区域
 """
 
 from __future__ import annotations
@@ -34,6 +42,16 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Int32, String
+
+from yzbot_task.local_solver import (
+    detect_rule_id,
+    rule_banner,
+    rule_view,
+)
+
+
+# 出题程序比赛模式参数（与 exam_feeder._CONTEST_ARG 保持一致，不跨模块 import）
+_CONTEST_ARG = "11470507"
 
 
 def _latched_qos() -> QoSProfile:
@@ -110,42 +128,6 @@ def _parse_xy(xy: str, cmd: str) -> Tuple[Optional[int], Optional[int]]:
     return x, y
 
 
-def _zone_for(n: int, threshold: int, high: str, low: str) -> str:
-    return high if int(n) >= int(threshold) else low
-
-
-def _format_counts(
-    xy: str,
-    cmd: str,
-    *,
-    rule_text: str,
-    threshold: int,
-    high_zone: str,
-    low_zone: str,
-) -> str:
-    x, y = _parse_xy(xy, cmd)
-    lines: List[str] = [f"映射规则：{rule_text}"]
-    if x is not None:
-        zx = _zone_for(x, threshold, high_zone, low_zone)
-        # 若命令里已写明红色区，以命令为准
-        m = re.search(r"red\s*,\s*\d+\s*,\s*([ABC])", cmd or "", re.I)
-        if m:
-            zx = m.group(1).upper()
-        lines.append(f"红色数量 x={x} → {zx}区")
-    if y is not None:
-        zy = _zone_for(y, threshold, high_zone, low_zone)
-        m = re.search(r"blue\s*,\s*\d+\s*,\s*([ABC])", cmd or "", re.I)
-        if m:
-            zy = m.group(1).upper()
-        lines.append(f"蓝色数量 y={y} → {zy}区")
-    mapped = _format_command_cn(cmd)
-    if mapped and mapped != "待生成":
-        lines.append(f"抓取任务：{mapped}")
-    if len(lines) == 1:
-        lines.append("等待大模型解析颜色与数量")
-    return "\n".join(lines)
-
-
 def _format_plan_cn(plan: str, cmd: str) -> str:
     text = _format_command_cn(plan) if plan else ""
     if text and text != "待生成":
@@ -164,16 +146,14 @@ class VizBridge(Node):
         self.declare_parameter("threshold", 3)
         self.declare_parameter("high_zone", "A")
         self.declare_parameter("low_zone", "C")
-        self.declare_parameter(
-            "mapping_rule_text",
-            "① x代表红色，y代表蓝色；数值≥3去A区，其他去C区",
-        )
+        # 国赛规则：rule_id=1/2/3 显式指定；0=按 rule_text / 外部 /mapping_rule_text 自动识别
+        self.declare_parameter("rule_id", 0)
+        self.declare_parameter("mapping_rule_text", "")
 
         qos = _latched_qos()
 
         self.pub_q = self.create_publisher(String, "/viz/question", qos)
         self.pub_order = self.create_publisher(String, "/viz/grasp_order", qos)
-        self.pub_counts = self.create_publisher(String, "/viz/counts", qos)
         self.pub_mapping = self.create_publisher(String, "/viz/mapping_rule", qos)
         self.pub_red_count = self.create_publisher(Int32, "/viz/red_count", qos)
         self.pub_blue_count = self.create_publisher(Int32, "/viz/blue_count", qos)
@@ -182,14 +162,19 @@ class VizBridge(Node):
         self.pub_progress = self.create_publisher(String, "/viz/progress", qos)
         self.pub_work = self.create_publisher(String, "/viz/work_state", qos)
         self.pub_elapsed = self.create_publisher(String, "/viz/elapsed", qos)
-        self.pub_chat = self.create_publisher(String, "/chat", qos)
+        self.pub_seed = self.create_publisher(String, "/viz/seed", qos)
+        self.pub_cur_task = self.create_publisher(String, "/viz/current_task", qos)
+        self.pub_exam_mode = self.create_publisher(String, "/viz/exam_mode", qos)
+        # 右列彩色面板用的短格式显示话题：Indicator 只能显示枚举规则的 label，
+        # 无法回显「进度 3/5 件（进行中）」这类带数字的长句，故另发短格式。
+        # 原 /viz/progress、/viz/current_task、/viz/work_state 长句话题保持不变。
+        self.pub_progress_n = self.create_publisher(Int32, "/viz/progress_n", qos)
+        self.pub_task_phase = self.create_publisher(String, "/viz/task_phase", qos)
+        self.pub_ee_state = self.create_publisher(String, "/viz/ee_state", qos)
 
-        self.pub_color = self.create_publisher(Int32, "/color", qos)
-        self.pub_task = self.create_publisher(Int32, "/task", qos)
-        self.pub_pick = self.create_publisher(Int32, "/pick", qos)
-        self.pub_cur = self.create_publisher(Int32, "/cur", qos)
 
         self._question = "等待接收比赛题目"
+        self._seed = ""
         self._xy = ""
         self._command = ""
         self._plan = ""
@@ -203,6 +188,8 @@ class VizBridge(Node):
         self._blue_n: Optional[int] = None
         self._red_zone_txt = "红色 → 待映射"
         self._blue_zone_txt = "蓝色 → 待映射"
+        self._rule_text_in = str(self.get_parameter("mapping_rule_text").value or "").strip()
+        self._exam_arg: Optional[str] = None
 
         self._t0: Optional[float] = None
         self._t_stop: Optional[float] = None
@@ -210,23 +197,51 @@ class VizBridge(Node):
 
         self.create_subscription(String, "/exam_question", self._on_question, 10)
         self.create_subscription(String, "/exam_question_echo", self._on_question, 10)
+        self.create_subscription(String, "/exam_seed", self._on_seed, 10)
         self.create_subscription(String, "/llm_xy", self._on_xy, 10)
         self.create_subscription(String, "/task_command", self._on_command, 10)
         self.create_subscription(String, "/task_plan", self._on_plan, 10)
         self.create_subscription(String, "/task_status", self._on_status, 10)
         self.create_subscription(String, "/task_info", self._on_info, 10)
+        # llm_solver 发布当前生效的国赛规则原文（latched）→ 规则题目面板与区域计算
+        # 订阅端用默认 volatile QoS：volatile 订阅既能收 latched 也能收面板的临时发布器。
+        self.create_subscription(
+            String, "/mapping_rule_text", self._on_rule_text, 10
+        )
+        # 面板输入（coStudio Publish 面板，std_msgs/String）：
+        #   /panel_exam_question — 粘贴/输入题目（与 /exam_question 同处理）
+        #   /exam_arg            — 出题程序参数：11470507=比赛模式，空=练习模式
+        self.create_subscription(
+            String, "/panel_exam_question", self._on_panel_question, 10
+        )
+        self.create_subscription(String, "/exam_arg", self._on_exam_arg, 10)
 
         self.create_timer(0.2, self._tick_elapsed)
 
-        self._publish_ints(color=0, task=0, pick=-1, cur=0)
         self._flush()
         self.get_logger().info(
-            "viz_bridge ready（规则①：红/蓝数量+放置区面板；"
+            f"viz_bridge ready（映射规则 {self._rule_text()}；"
             "测试总用时 /viz/elapsed；赛场 -p show_elapsed:=false）"
         )
 
+    def _explicit_rule_id(self) -> int:
+        try:
+            rid = int(self.get_parameter("rule_id").value)
+        except (TypeError, ValueError):
+            rid = 0
+        return rid if rid in (1, 2, 3) else 0
+
+    def _rule_id(self) -> int:
+        rid = self._explicit_rule_id()
+        if rid:
+            return rid
+        return detect_rule_id(self._rule_text_in, 1)
+
     def _rule_text(self) -> str:
-        return str(self.get_parameter("mapping_rule_text").value)
+        rid = self._explicit_rule_id()
+        if rid:
+            return rule_banner(rid)
+        return self._rule_text_in or rule_banner(self._rule_id())
 
     def _threshold(self) -> int:
         return int(self.get_parameter("threshold").value)
@@ -239,11 +254,21 @@ class VizBridge(Node):
 
     def _refresh_xy_zones(self):
         x, y = _parse_xy(self._xy, self._command)
-        self._red_n, self._blue_n = x, y
-        thr = self._threshold()
-        hi, lo = self._high_zone(), self._low_zone()
-        # 命令里显式区优先
         zx = zy = None
+        if x is not None and y is not None:
+            view = rule_view(
+                int(x),
+                int(y),
+                rule_id=self._rule_id(),
+                threshold=self._threshold(),
+                high_zone=self._high_zone(),
+                low_zone=self._low_zone(),
+            )
+            self._red_n, self._blue_n = view["red_n"], view["blue_n"]
+            zx, zy = view["red_zone"] or None, view["blue_zone"] or None
+        else:
+            self._red_n = self._blue_n = None
+        # 命令里显式区优先（task_command 已是最终结果）
         if self._command:
             mr = re.search(r"red\s*,\s*\d+\s*,\s*([ABC])", self._command, re.I)
             mb = re.search(r"blue\s*,\s*\d+\s*,\s*([ABC])", self._command, re.I)
@@ -251,10 +276,6 @@ class VizBridge(Node):
                 zx = mr.group(1).upper()
             if mb:
                 zy = mb.group(1).upper()
-        if x is not None and zx is None:
-            zx = _zone_for(x, thr, hi, lo)
-        if y is not None and zy is None:
-            zy = _zone_for(y, thr, hi, lo)
         self._red_zone_txt = f"红色 → {zx}区" if zx else "红色 → 待映射"
         self._blue_zone_txt = f"蓝色 → {zy}区" if zy else "蓝色 → 待映射"
 
@@ -289,23 +310,6 @@ class VizBridge(Node):
         msg.data = self._elapsed_text
         self.pub_elapsed.publish(msg)
 
-    def _publish_ints(
-        self,
-        *,
-        color: Optional[int] = None,
-        task: Optional[int] = None,
-        pick: Optional[int] = None,
-        cur: Optional[int] = None,
-    ):
-        if color is not None and color >= 0:
-            self.pub_color.publish(Int32(data=int(color)))
-        if task is not None and task >= 0:
-            self.pub_task.publish(Int32(data=int(task)))
-        if pick is not None and pick >= 0:
-            self.pub_pick.publish(Int32(data=int(pick)))
-        if cur is not None and cur >= 0:
-            self.pub_cur.publish(Int32(data=int(cur)))
-
     def _progress_line(self) -> str:
         if self._total <= 0:
             return self._progress_text
@@ -319,6 +323,53 @@ class VizBridge(Node):
             return ""
         return f"当前目标：{_color_cn(self._cur_color)}"
 
+    def _question_text(self) -> str:
+        """计算题目：去掉官方 bin 的「题目:」前缀，只留正文。"""
+        q = (self._question or "").strip()
+        for pfx in ("题目:", "题目：", "题目"):
+            if q.startswith(pfx):
+                q = q[len(pfx):].strip()
+                break
+        return q or "等待接收比赛题目"
+
+    def _current_task_line(self) -> str:
+        """当前任务：第 i/N 件：红色货物#3 → C 区（正计数，随进度更新）。"""
+        legs = re.findall(
+            r"(red|blue)\s*#\s*(\d+)\s*,\s*([ABC])", self._plan or "", re.I
+        )
+        if not legs:
+            legs = re.findall(
+                r"(red|blue)\s*,\s*(\d+)\s*,\s*([ABC])", self._plan or "", re.I
+            )
+        if not legs:
+            return "等待生成抓取顺序"
+        n_legs = len(legs)
+        if self._done >= n_legs and self._phase == "done":
+            return f"全部 {n_legs} 件已完成"
+        idx = min(self._done, n_legs - 1)
+        color, num, zone = legs[idx]
+        return (
+            f"第 {idx + 1}/{n_legs} 件：{_color_cn(color)}#{num} → "
+            f"{_zone_cn(zone)}"
+        )
+
+    # 右列彩色面板的短格式映射（取值有限，供 coStudio Indicator 枚举上色）。
+    _TASK_PHASE = {
+        "idle": "系统待机", "solve": "大模型解题中", "ready": "任务就绪",
+        "nav": "前往取货点", "grasp": "识别并抓取", "place": "运往放置区",
+        "done": "本轮完成",
+    }
+    _EE_STATE = {
+        "idle": "未夹取物块", "solve": "未夹取物块", "ready": "未夹取物块",
+        "nav": "移动中", "grasp": "夹取中", "place": "放置中", "done": "已释放",
+    }
+
+    def _task_phase_text(self) -> str:
+        return self._TASK_PHASE.get(self._phase, "系统待机")
+
+    def _ee_state_text(self) -> str:
+        return self._EE_STATE.get(self._phase, "未夹取物块")
+
     def _flush(self):
         def _s(pub, text: str):
             msg = String()
@@ -326,50 +377,61 @@ class VizBridge(Node):
             pub.publish(msg)
 
         self._refresh_xy_zones()
-        counts = _format_counts(
-            self._xy,
-            self._command,
-            rule_text=self._rule_text(),
-            threshold=self._threshold(),
-            high_zone=self._high_zone(),
-            low_zone=self._low_zone(),
-        )
         order = _format_plan_cn(self._plan, self._command)
         progress = self._progress_line()
         work = self._work
         if self._target_line() and self._phase in ("nav", "grasp", "place"):
             work = f"{self._work}（{self._target_line()}）"
 
-        _s(self.pub_q, self._question)
+        _s(self.pub_q, self._question_text())
+        _s(self.pub_seed, self._seed or "—")
+        _s(self.pub_exam_mode, self._exam_mode_text())
+        _s(self.pub_cur_task, self._current_task_line())
         _s(self.pub_order, order)
-        _s(self.pub_counts, counts)
         _s(self.pub_mapping, self._rule_text())
         _s(self.pub_red_zone, self._red_zone_txt)
         _s(self.pub_blue_zone, self._blue_zone_txt)
-        if self._red_n is not None:
-            self.pub_red_count.publish(Int32(data=int(self._red_n)))
-        if self._blue_n is not None:
-            self.pub_blue_count.publish(Int32(data=int(self._blue_n)))
+        # 未解析时发 -1：Indicator 无匹配规则 -> 显示 fallbackLabel「待解析」
+        self.pub_red_count.publish(
+            Int32(data=int(self._red_n) if self._red_n is not None else -1)
+        )
+        self.pub_blue_count.publish(
+            Int32(data=int(self._blue_n) if self._blue_n is not None else -1)
+        )
+        # 右列彩色短格式：进度=已放置件数（正计数），当前任务=阶段，状态=末端状态
+        self.pub_progress_n.publish(Int32(data=int(self._done)))
+        _s(self.pub_task_phase, self._task_phase_text())
+        _s(self.pub_ee_state, self._ee_state_text())
         _s(self.pub_progress, progress)
         _s(self.pub_work, work)
         if self._show_elapsed():
             _s(self.pub_elapsed, self._elapsed_text)
 
-        chat_lines = [
-            f"【任务题目】{self._question}",
-            f"【映射规则】{self._rule_text()}",
-            f"【资源数量】{counts.replace(chr(10), '；')}",
-            f"【红色】{self._red_zone_txt}"
-            + (f" 数量={self._red_n}" if self._red_n is not None else ""),
-            f"【蓝色】{self._blue_zone_txt}"
-            + (f" 数量={self._blue_n}" if self._blue_n is not None else ""),
-            f"【抓取顺序】{order}",
-            f"【任务进度】{progress}",
-            f"【工作状态】{work}",
-        ]
-        if self._show_elapsed():
-            chat_lines.append(f"【{self._elapsed_text}】")
-        _s(self.pub_chat, "\n".join(chat_lines))
+
+    def _exam_mode_text(self) -> str:
+        """出题模式（面板 /exam_arg 输入；比赛参数 11470507，空=练习）。"""
+        if self._exam_arg is None:
+            return "出题参数：未输入（默认练习模式）"
+        arg = self._exam_arg.strip()
+        if not arg:
+            return "练习模式（参数留空）"
+        if arg == _CONTEST_ARG:
+            return f"比赛模式（参数 {arg}）"
+        return f"自定义参数（{arg}）"
+
+    def _on_exam_arg(self, msg: String):
+        """面板输入出题程序参数：11470507=比赛模式，空=练习模式。"""
+        self._exam_arg = (msg.data or "").strip()
+        self._work = f"出题参数已设置：{self._exam_mode_text()}"
+        self._flush()
+        self.get_logger().info(f"/exam_arg 面板输入 → {self._exam_mode_text()}")
+
+    def _on_panel_question(self, msg: String):
+        """面板粘贴/输入的题目：与官方出题同处理，并标注来源。"""
+        self._on_question(msg)
+        if self._question:
+            self._work = "题目（面板输入）已接收"
+            self._flush()
 
     def _on_question(self, msg: String):
         q = (msg.data or "").strip()
@@ -380,7 +442,22 @@ class VizBridge(Node):
         self._work = "大模型解题中"
         self._progress_text = "正在解析题目"
         self._start_timer("收到题目")
-        self._publish_ints(cur=0)
+        self._flush()
+
+    def _on_rule_text(self, msg: String):
+        """当前生效的国赛映射规则原文（来自 llm_solver，latched）。"""
+        txt = (msg.data or "").strip()
+        if not txt:
+            return
+        self._rule_text_in = txt
+        self._flush()
+
+    def _on_seed(self, msg: String):
+        """题目种子：官方出题 bin 的「使用种子」行（评分项，必须显示）。"""
+        seed = (msg.data or "").strip()
+        if not seed:
+            return
+        self._seed = seed
         self._flush()
 
     def _on_xy(self, msg: String):
@@ -406,7 +483,6 @@ class VizBridge(Node):
             self._total = total
             self._done = 0
             self._progress_text = f"计划抓取 {self._total} 件货物"
-        self._publish_ints(cur=0)
         self._flush()
 
     def _on_plan(self, msg: String):
@@ -432,7 +508,6 @@ class VizBridge(Node):
             return
         self._cur_color = m.group(1)
         c = 1 if self._cur_color == "red" else 0
-        self._publish_ints(color=c, task=c)
 
     def _bump_done(self):
         if self._total > 0:
@@ -464,7 +539,6 @@ class VizBridge(Node):
             # 清掉上一次 FAIL 残留的「作业受阻」文案
             self._phase = "nav"
             self._work = f"开始第 {cur_i}/{tot} 件任务"
-            self._publish_ints(cur=1)
 
         # 1) 勿用裸 DONE — PLACE_VISION_DONE 等会误停表
         # 2) 每块先 DETACH_OK 再 PLACED —— 只计 PLACED 一次，否则翻倍提前「完成」
@@ -484,7 +558,6 @@ class VizBridge(Node):
                 self._phase = "done"
                 self._work = "本轮任务全部完成"
                 self._stop_timer()
-                self._publish_ints(pick=1, cur=0)
             else:
                 self._phase = "nav"
                 self._work = (
@@ -493,7 +566,6 @@ class VizBridge(Node):
                     else "货物已放置，准备下一件"
                 )
                 # 中途保持「前往取货」，勿 cur=0 待机（否则像结束了）
-                self._publish_ints(pick=1, cur=1)
         elif round_done:
             self._phase = "done"
             self._stop_timer()
@@ -512,7 +584,6 @@ class VizBridge(Node):
             else:
                 self._progress_text = f"流程结束（已放置 {self._done}）"
                 self._work = "本轮流程结束"
-            self._publish_ints(pick=1, cur=0)
         elif any(
             k in text
             for k in (
@@ -536,7 +607,6 @@ class VizBridge(Node):
         ):
             self._phase = "place"
             self._work = "运往放置区并完成放置"
-            self._publish_ints(cur=3, pick=0)
         elif any(
             k in text
             for k in (
@@ -565,7 +635,6 @@ class VizBridge(Node):
             # 导航到位后的视觉贴近/抓取 —— 勿再显示「前往取货」
             self._phase = "grasp"
             self._work = "识别目标并执行抓取"
-            self._publish_ints(cur=2, pick=0)
         elif any(
             k in text
             for k in (
@@ -577,22 +646,17 @@ class VizBridge(Node):
         ):
             self._phase = "nav"
             self._work = "导航前往取货点"
-            self._publish_ints(cur=1)
         elif any(k in text for k in ("LLM_SOLVED", "SOLVED", "PARSED", "PLAN_OK")):
             self._phase = "ready"
             self._work = "任务指令已解析"
-            self._publish_ints(cur=0)
         elif "WAITING_SERVERS" in text:
             self._work = "系统初始化中"
-            self._publish_ints(cur=0)
         elif text.startswith("SERVERS_OK") or text.startswith("SERVERS_OK "):
             self._phase = "nav"
             self._work = "定位就绪，开始作业"
-            self._publish_ints(cur=1)
         elif "LOC_WAIT" in text:
             self._phase = "ready"
             self._work = "等待仿真定位就绪"
-            self._publish_ints(cur=0)
         elif any(
             k in text
             for k in (
@@ -614,7 +678,6 @@ class VizBridge(Node):
         elif "SKIP_CUBE" in text:
             self._phase = "nav"
             self._work = "本块跳过，前往下一件"
-            self._publish_ints(cur=1)
 
         self._flush()
 

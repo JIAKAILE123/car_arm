@@ -9,6 +9,7 @@ from yzbot_task.deepseek_client import solve_xy_deepseek
 from yzbot_task.local_solver import (
     is_official_xy,
     map_xy_to_tasks,
+    resolve_rule_id,
     solve_xy_from_question,
     try_parse_direct_command,
 )
@@ -151,5 +152,6 @@ def question_to_command_llm(
         threshold=int(mapping.get("threshold", 3)),
         high_zone=str(mapping.get("high_zone", "A")),
         low_zone=str(mapping.get("low_zone", "C")),
+        rule_id=resolve_rule_id(mapping.get("rule_id", 0), mapping.get("rule_text", "")),
     )
     return format_command(tasks), x, y

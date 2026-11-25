@@ -193,6 +193,124 @@ def is_official_xy(x: int, y: int) -> bool:
     return int(x) >= 1 and int(y) >= 1 and int(x) + int(y) == 5
 
 
+# ===== 国赛三条映射规则（PDF《创新赛题目和映射规则》，赛前由裁判三选一）=====
+# ① 颜色按变量固定，区域按数量：x=红、y=蓝；数量≥3 → A 区，否则 → C 区。
+# ② 颜色按数量：≥3 的那个代表红色、否则蓝色；区域按变量：x → B 区、y → A 区。
+# ③ 颜色按大小：数值大的为蓝色、数值少的为红色；区域按颜色：蓝 → B 区、红 → C 区。
+OFFICIAL_RULES = {
+    1: "x 代表红色,y 代表蓝色;数值大于等于 3 的去 A 区,其他颜色去 C 区",
+    2: "xy 中,数值大于等于 3 值的代表红色，否则代表蓝色；x 去 B 区,y 去 A 区",
+    3: "蓝色去 B 区,红色去 C 区; xy 中,数值大的是蓝色，数值少的是红色",
+}
+RULE_MARKS = {1: "①", 2: "②", 3: "③"}
+
+
+def _norm_rule_text(text: str) -> str:
+    """规则原文归一化：全角标点 → 半角，去空白，转小写。"""
+    t = str(text or "").strip()
+    for a, b in (
+        ("，", ","), ("；", ";"), ("：", ":"), ("、", ","),
+        ("（", "("), ("）", ")"), ("\u3000", " "), ("　", " "),
+    ):
+        t = t.replace(a, b)
+    return "".join(t.split()).lower()
+
+
+def detect_rule_id(text: str, default: int = 1) -> int:
+    """从规则原文识别国赛规则编号（1/2/3）；识别不出回 default。"""
+    t = _norm_rule_text(text)
+    if not t:
+        return default
+    if "x去b区" in t or ("b区" in t and "y去a区" in t):
+        return 2
+    if "数值大的" in t or ("蓝色去b区" in t and "红色去c区" in t):
+        return 3
+    if "x代表红色" in t or ("大于等于3" in t and "a区" in t):
+        return 1
+    return default
+
+
+def resolve_rule_id(rule_id=0, rule_text: str = "") -> int:
+    """解析规则编号：显式 1/2/3 优先，否则按规则原文自动识别，默认 1。"""
+    try:
+        rid = int(rule_id)
+    except (TypeError, ValueError):
+        rid = 0
+    if rid in (1, 2, 3):
+        return rid
+    return detect_rule_id(rule_text, default=1)
+
+
+def rule_banner(rule_id=1) -> str:
+    """规则面板文案，例如「规则②：xy 中,数值大于等于 3 ...」。"""
+    rid = resolve_rule_id(rule_id)
+    return f"规则{RULE_MARKS[rid]}：{OFFICIAL_RULES[rid]}"
+
+
+def rule_assign(
+    x: int,
+    y: int,
+    *,
+    rule_id=1,
+    x_color: str = "red",
+    y_color: str = "blue",
+    threshold: int = 3,
+    high_zone: str = "A",
+    low_zone: str = "C",
+):
+    """按国赛规则给出每个变量的 (变量, 数量, 颜色, 区域) 四元组列表。"""
+    rid = resolve_rule_id(rule_id)
+    xt, yt = int(x), int(y)
+    thr = int(threshold)
+    xc, yc = str(x_color).lower(), str(y_color).lower()
+    out = []
+    if rid == 2:
+        # 数值≥threshold 的代表红色，否则蓝色；区域按变量：x→B、y→A
+        for var, n in (("x", xt), ("y", yt)):
+            out.append((var, n, xc if n >= thr else yc, "B" if var == "x" else "A"))
+    elif rid == 3:
+        # 数值大的为蓝色，小的为红色；区域按颜色：蓝→B、红→C
+        for var, n, other in (("x", xt, yt), ("y", yt, xt)):
+            col = yc if n >= other else xc
+            out.append((var, n, col, "B" if col == yc else "C"))
+    else:
+        # 规则①：颜色按变量固定，区域按数量 ≥threshold → high_zone
+        for var, n, col in (("x", xt, xc), ("y", yt, yc)):
+            out.append((var, n, col, high_zone if n >= thr else low_zone))
+    return out
+
+
+def rule_view(
+    x: int,
+    y: int,
+    *,
+    rule_id=1,
+    x_color: str = "red",
+    y_color: str = "blue",
+    threshold: int = 3,
+    high_zone: str = "A",
+    low_zone: str = "C",
+) -> Dict:
+    """可视化用：按规则算出红/蓝数量与红/蓝区域。"""
+    pairs = rule_assign(
+        x, y, rule_id=rule_id, x_color=x_color, y_color=y_color,
+        threshold=threshold, high_zone=high_zone, low_zone=low_zone,
+    )
+    red_n = sum(n for _v, n, c, _z in pairs if c == "red")
+    blue_n = sum(n for _v, n, c, _z in pairs if c == "blue")
+    red_zone = next((z for _v, n, c, z in pairs if c == "red" and n > 0), "")
+    blue_zone = next((z for _v, n, c, z in pairs if c == "blue" and n > 0), "")
+    rid = resolve_rule_id(rule_id)
+    return {
+        "rule_id": rid,
+        "red_n": red_n,
+        "blue_n": blue_n,
+        "red_zone": red_zone,
+        "blue_zone": blue_zone,
+        "text": rule_banner(rid),
+    }
+
+
 def map_xy_to_tasks(
     x: int,
     y: int,
@@ -202,21 +320,20 @@ def map_xy_to_tasks(
     threshold: int = 3,
     high_zone: str = "A",
     low_zone: str = "C",
+    rule_id=1,
 ) -> List[PickTask]:
-    """赛前映射例（规则 PDF）：数量≥threshold → high_zone，否则 → low_zone。
+    """按国赛映射规则把 (x, y) 变成抓取任务列表。
 
-    默认 threshold=3、A/C，与「数量大于等于3的去A区，其他去C区」一致。
-    数量门槛是 ≥3，不是 >0 / >1；>0 只表示该颜色有任务要发。
+    rule_id=1（默认）与旧行为完全一致：颜色按变量、区域按数量≥threshold。
+    rule_id=2/3 见 OFFICIAL_RULES 注释；数量门槛是 ≥3（x+y=5 时不会同为 ≥3）。
     """
-
-    def zone_for(n: int) -> str:
-        return high_zone if n >= threshold else low_zone
-
     tasks: List[PickTask] = []
-    if x > 0:
-        tasks.append(PickTask(x_color.lower(), x, zone_for(x)))
-    if y > 0:
-        tasks.append(PickTask(y_color.lower(), y, zone_for(y)))
+    for _var, n, col, zone in rule_assign(
+        x, y, rule_id=rule_id, x_color=x_color, y_color=y_color,
+        threshold=threshold, high_zone=high_zone, low_zone=low_zone,
+    ):
+        if n > 0:
+            tasks.append(PickTask(col, n, zone))
     return tasks
 
 
@@ -234,5 +351,6 @@ def question_to_command(question: str, mapping: Dict | None = None) -> str:
         threshold=int(mapping.get("threshold", 3)),
         high_zone=mapping.get("high_zone", "A"),
         low_zone=mapping.get("low_zone", "C"),
+        rule_id=resolve_rule_id(mapping.get("rule_id", 0), mapping.get("rule_text", "")),
     )
     return format_command(tasks)

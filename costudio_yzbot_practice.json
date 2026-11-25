@@ -1,0 +1,1006 @@
+{
+  "configById": {
+    "RawMessages!seed": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/viz/seed.data",
+      "fontSize": 30,
+      "foxglovePanelTitle": "题目种子"
+    },
+    "RawMessages!calc": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/viz/question.data",
+      "fontSize": 20,
+      "foxglovePanelTitle": "计算题目"
+    },
+    "RawMessages!rule": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/viz/mapping_rule.data",
+      "fontSize": 17,
+      "foxglovePanelTitle": "规则题目"
+    },
+    "Indicator!rnum": {
+      "path": "/viz/red_count.data",
+      "style": "background",
+      "fontSize": 48,
+      "fallbackColor": "#9e9e9e",
+      "fallbackLabel": "待解析",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "0",
+          "color": "#e66974",
+          "label": "0"
+        },
+        {
+          "operator": "=",
+          "rawValue": "1",
+          "color": "#e66974",
+          "label": "1"
+        },
+        {
+          "operator": "=",
+          "rawValue": "2",
+          "color": "#e66974",
+          "label": "2"
+        },
+        {
+          "operator": "=",
+          "rawValue": "3",
+          "color": "#e66974",
+          "label": "3"
+        },
+        {
+          "operator": "=",
+          "rawValue": "4",
+          "color": "#e66974",
+          "label": "4"
+        },
+        {
+          "operator": "=",
+          "rawValue": "5",
+          "color": "#e66974",
+          "label": "5"
+        },
+        {
+          "operator": "=",
+          "rawValue": "6",
+          "color": "#e66974",
+          "label": "6"
+        },
+        {
+          "operator": "=",
+          "rawValue": "7",
+          "color": "#e66974",
+          "label": "7"
+        },
+        {
+          "operator": "=",
+          "rawValue": "8",
+          "color": "#e66974",
+          "label": "8"
+        },
+        {
+          "operator": "=",
+          "rawValue": "9",
+          "color": "#e66974",
+          "label": "9"
+        },
+        {
+          "operator": "=",
+          "rawValue": "10",
+          "color": "#e66974",
+          "label": "10"
+        }
+      ],
+      "foxglovePanelTitle": "红色数量"
+    },
+    "Indicator!rzone": {
+      "path": "/viz/red_zone.data",
+      "style": "background",
+      "fontSize": 26,
+      "fallbackColor": "#9e9e9e",
+      "fallbackLabel": "待映射",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "红色 → A区",
+          "color": "#e6a88d",
+          "label": "红色 → A区"
+        },
+        {
+          "operator": "=",
+          "rawValue": "红色 → B区",
+          "color": "#e6a88d",
+          "label": "红色 → B区"
+        },
+        {
+          "operator": "=",
+          "rawValue": "红色 → C区",
+          "color": "#e6a88d",
+          "label": "红色 → C区"
+        },
+        {
+          "operator": "=",
+          "rawValue": "红色 → 待映射",
+          "color": "#e6a88d",
+          "label": "红色 → 待映射"
+        }
+      ],
+      "foxglovePanelTitle": "红色区域"
+    },
+    "Indicator!bnum": {
+      "path": "/viz/blue_count.data",
+      "style": "background",
+      "fontSize": 48,
+      "fallbackColor": "#9e9e9e",
+      "fallbackLabel": "待解析",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "0",
+          "color": "#4a7fc1",
+          "label": "0"
+        },
+        {
+          "operator": "=",
+          "rawValue": "1",
+          "color": "#4a7fc1",
+          "label": "1"
+        },
+        {
+          "operator": "=",
+          "rawValue": "2",
+          "color": "#4a7fc1",
+          "label": "2"
+        },
+        {
+          "operator": "=",
+          "rawValue": "3",
+          "color": "#4a7fc1",
+          "label": "3"
+        },
+        {
+          "operator": "=",
+          "rawValue": "4",
+          "color": "#4a7fc1",
+          "label": "4"
+        },
+        {
+          "operator": "=",
+          "rawValue": "5",
+          "color": "#4a7fc1",
+          "label": "5"
+        },
+        {
+          "operator": "=",
+          "rawValue": "6",
+          "color": "#4a7fc1",
+          "label": "6"
+        },
+        {
+          "operator": "=",
+          "rawValue": "7",
+          "color": "#4a7fc1",
+          "label": "7"
+        },
+        {
+          "operator": "=",
+          "rawValue": "8",
+          "color": "#4a7fc1",
+          "label": "8"
+        },
+        {
+          "operator": "=",
+          "rawValue": "9",
+          "color": "#4a7fc1",
+          "label": "9"
+        },
+        {
+          "operator": "=",
+          "rawValue": "10",
+          "color": "#4a7fc1",
+          "label": "10"
+        }
+      ],
+      "foxglovePanelTitle": "蓝色数量"
+    },
+    "Indicator!bzone": {
+      "path": "/viz/blue_zone.data",
+      "style": "background",
+      "fontSize": 26,
+      "fallbackColor": "#9e9e9e",
+      "fallbackLabel": "待映射",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "蓝色 → A区",
+          "color": "#8fbfdf",
+          "label": "蓝色 → A区"
+        },
+        {
+          "operator": "=",
+          "rawValue": "蓝色 → B区",
+          "color": "#8fbfdf",
+          "label": "蓝色 → B区"
+        },
+        {
+          "operator": "=",
+          "rawValue": "蓝色 → C区",
+          "color": "#8fbfdf",
+          "label": "蓝色 → C区"
+        },
+        {
+          "operator": "=",
+          "rawValue": "蓝色 → 待映射",
+          "color": "#8fbfdf",
+          "label": "蓝色 → 待映射"
+        }
+      ],
+      "foxglovePanelTitle": "蓝色区域"
+    },
+    "Image!cam": {
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 45,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {
+        "/scan": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/robot_description": {
+          "visible": false
+        },
+        "/camera_rgbd/camera_rgbd/points": {
+          "visible": false
+        }
+      },
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {
+        "imageTopic": "/camera/image_raw",
+        "calibrationTopic": "/camera/camera_info",
+        "synchronize": false,
+        "rotation": 0,
+        "flipHorizontal": false,
+        "flipVertical": false,
+        "annotations": {}
+      },
+      "foxglovePanelTitle": "识别画面（相机）"
+    },
+    "Image!vis": {
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 45,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {
+        "/scan": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/robot_description": {
+          "visible": false
+        },
+        "/camera_rgbd/camera_rgbd/points": {
+          "visible": false
+        }
+      },
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {
+        "imageTopic": "/yzbot/vision_debug",
+        "calibrationTopic": "",
+        "synchronize": false,
+        "rotation": 0,
+        "flipHorizontal": false,
+        "flipVertical": false,
+        "annotations": {}
+      },
+      "foxglovePanelTitle": "识别画面（识别）"
+    },
+    "3D!1juc55f": {
+      "cameraState": {
+        "perspective": true,
+        "distance": 19.99999999996871,
+        "phi": 34.85631513637342,
+        "thetaOffset": -3.1108598032924393,
+        "targetOffset": [
+          -0.5173103108147157,
+          0.912466240267345,
+          4.415519718104532e-17
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "followTf": "map",
+      "scene": {
+        "transforms": {
+          "editable": false,
+          "showLabel": false
+        },
+        "backgroundColor": "#ffffff"
+      },
+      "transforms": {
+        "frame:odom": {
+          "visible": true
+        },
+        "frame:base_link": {
+          "visible": false
+        },
+        "frame:link1": {
+          "visible": false
+        },
+        "frame:link2": {
+          "visible": false
+        },
+        "frame:link3": {
+          "visible": false
+        },
+        "frame:link4": {
+          "visible": false
+        },
+        "frame:link5": {
+          "visible": false
+        },
+        "frame:link6": {
+          "visible": true
+        },
+        "frame:gripper_finger_link1": {
+          "visible": false
+        },
+        "frame:gripper_finger_link2": {
+          "visible": false
+        },
+        "frame:back_caster_link": {
+          "visible": false
+        },
+        "frame:camera_link": {
+          "visible": false
+        },
+        "frame:laser_link": {
+          "visible": false
+        },
+        "frame:left_wheel_link": {
+          "visible": false
+        },
+        "frame:right_wheel_link": {
+          "visible": false
+        },
+        "frame:arm_base_link": {
+          "visible": false
+        },
+        "frame:camera_rgbd_link": {
+          "visible": false
+        },
+        "frame:camera_rgbd_frame_optical": {
+          "visible": false
+        },
+        "frame:grasping_frame": {
+          "visible": false
+        }
+      },
+      "topics": {
+        "/camera/color/image_raw/compressed": {
+          "visible": false
+        },
+        "/scan": {
+          "visible": true,
+          "colorField": "range",
+          "colorMode": "gradient",
+          "colorMap": "turbo",
+          "pointSize": 4,
+          "decayTime": 0.5,
+          "pointShape": "square",
+          "cubeSize": 0.06,
+          "cubeOutline": false
+        },
+        "/robot_description": {
+          "visible": true,
+          "displayMode": "auto",
+          "showOutlines": false,
+          "showAxis": false
+        },
+        "/camera/camera_info": {
+          "visible": false,
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "width": 0.01
+        },
+        "/camera/image_raw": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/camera/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "color": "#ffffff"
+        },
+        "/camera_rgbd/camera_rgbd/camera_info": {
+          "visible": false
+        },
+        "/move_base_simple/goal": {
+          "visible": false
+        },
+        "/initialpose": {
+          "visible": false
+        },
+        "/camera_rgbd/camera_rgbd/points": {
+          "visible": false
+        },
+        "/camera_rgbd/camera_rgbd/image_raw": {
+          "visible": false
+        },
+        "/camera_rgbd/camera_rgbd/depth/image_raw": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/camera_rgbd/camera_rgbd/depth/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "color": "#ffffff"
+        },
+        "/camera_rgbd/camera_rgbd/depth/camera_info": {
+          "visible": false
+        },
+        "/map": {
+          "visible": true
+        },
+        "/global_costmap/published_footprint": {
+          "visible": true
+        },
+        "/local_costmap/published_footprint": {
+          "visible": true
+        },
+        "/local_plan": {
+          "visible": true
+        },
+        "/plan": {
+          "visible": true,
+          "lineWidth": 0.205,
+          "type": "line",
+          "color": "#f6c50f"
+        },
+        "/plan_smoothed": {
+          "visible": true
+        },
+        "/waypoints": {
+          "visible": true
+        },
+        "/trajectories": {
+          "visible": true
+        },
+        "/mobile_base/sensors/bumper_pointcloud": {
+          "visible": false
+        },
+        "/local_costmap/costmap": {
+          "visible": false
+        },
+        "/local_costmap/voxel_marked_cloud": {
+          "visible": false
+        },
+        "/local_costmap/clearing_endpoints": {
+          "visible": false,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/goal_pose": {
+          "visible": false
+        },
+        "/global_costmap/voxel_marked_cloud": {
+          "visible": false
+        },
+        "/amcl_pose": {
+          "visible": true
+        },
+        "/display_contacts": {
+          "visible": false
+        },
+        "/global_costmap/costmap": {
+          "visible": false
+        },
+        "/downsampled_costmap": {
+          "visible": false
+        },
+        "/transformed_global_plan": {
+          "visible": false
+        }
+      },
+      "layers": {
+        "grid": {
+          "visible": true,
+          "frameLocked": true,
+          "label": "Grid",
+          "instanceId": "624e37d7-3a83-446e-9453-588dddcda22d",
+          "layerId": "foxglove.Grid",
+          "size": 10,
+          "divisions": 10,
+          "lineWidth": 1,
+          "color": "#248eff",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ]
+        },
+        "71656b70-8afa-48d6-93c2-6ad44c1442bb": {
+          "displayMode": "auto",
+          "fallbackColor": "#ffffff",
+          "showAxis": false,
+          "axisScale": 1,
+          "showOutlines": true,
+          "opacity": 1,
+          "visible": true,
+          "frameLocked": true,
+          "instanceId": "71656b70-8afa-48d6-93c2-6ad44c1442bb",
+          "label": "URDF",
+          "layerId": "foxglove.Urdf",
+          "sourceType": "topic",
+          "url": "",
+          "filePath": "",
+          "parameter": "",
+          "topic": "/robot_description",
+          "framePrefix": "",
+          "order": 1
+        }
+      },
+      "publish": {
+        "type": "pose",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {},
+      "foxglovePanelTitle": "三维（移动路径）"
+    },
+    "Indicator!prog": {
+      "path": "/viz/progress_n.data",
+      "style": "background",
+      "fontSize": 40,
+      "fallbackColor": "#9e9e9e",
+      "fallbackLabel": "未开始",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "0",
+          "color": "#f6ec09",
+          "label": "第0个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "1",
+          "color": "#f6ec09",
+          "label": "第1个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "2",
+          "color": "#f6ec09",
+          "label": "第2个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "3",
+          "color": "#f6ec09",
+          "label": "第3个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "4",
+          "color": "#f6ec09",
+          "label": "第4个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "5",
+          "color": "#f6ec09",
+          "label": "第5个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "6",
+          "color": "#f6ec09",
+          "label": "第6个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "7",
+          "color": "#f6ec09",
+          "label": "第7个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "8",
+          "color": "#f6ec09",
+          "label": "第8个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "9",
+          "color": "#f6ec09",
+          "label": "第9个"
+        },
+        {
+          "operator": "=",
+          "rawValue": "10",
+          "color": "#f6ec09",
+          "label": "第10个"
+        }
+      ],
+      "foxglovePanelTitle": "任务进度"
+    },
+    "Indicator!taskphase": {
+      "path": "/viz/task_phase.data",
+      "style": "background",
+      "fontSize": 26,
+      "fallbackColor": "#9e9e9e",
+      "fallbackLabel": "系统待机",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "系统待机",
+          "color": "#8f43f5",
+          "label": "系统待机"
+        },
+        {
+          "operator": "=",
+          "rawValue": "大模型解题中",
+          "color": "#8f43f5",
+          "label": "大模型解题中"
+        },
+        {
+          "operator": "=",
+          "rawValue": "任务就绪",
+          "color": "#8f43f5",
+          "label": "任务就绪"
+        },
+        {
+          "operator": "=",
+          "rawValue": "前往取货点",
+          "color": "#8f43f5",
+          "label": "前往取货点"
+        },
+        {
+          "operator": "=",
+          "rawValue": "识别并抓取",
+          "color": "#8f43f5",
+          "label": "识别并抓取"
+        },
+        {
+          "operator": "=",
+          "rawValue": "运往放置区",
+          "color": "#8f43f5",
+          "label": "运往放置区"
+        },
+        {
+          "operator": "=",
+          "rawValue": "本轮完成",
+          "color": "#8f43f5",
+          "label": "本轮完成"
+        }
+      ],
+      "foxglovePanelTitle": "当前任务"
+    },
+    "Indicator!eestate": {
+      "path": "/viz/ee_state.data",
+      "style": "background",
+      "fontSize": 30,
+      "fallbackColor": "#9e9e9e",
+      "fallbackLabel": "未夹取物块",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "未夹取物块",
+          "color": "#63d54a",
+          "label": "未夹取物块"
+        },
+        {
+          "operator": "=",
+          "rawValue": "移动中",
+          "color": "#63d54a",
+          "label": "移动中"
+        },
+        {
+          "operator": "=",
+          "rawValue": "夹取中",
+          "color": "#63d54a",
+          "label": "夹取中"
+        },
+        {
+          "operator": "=",
+          "rawValue": "放置中",
+          "color": "#63d54a",
+          "label": "放置中"
+        },
+        {
+          "operator": "=",
+          "rawValue": "已释放",
+          "color": "#63d54a",
+          "label": "已释放"
+        }
+      ],
+      "foxglovePanelTitle": "状态"
+    },
+    "Publish!start": {
+      "topicName": "/task_start",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "开始任务",
+      "buttonTooltip": "用上一题重新解题并下发任务指令",
+      "buttonColor": "",
+      "advancedView": true,
+      "value": "{\n  \"data\": \"go\"\n}",
+      "foxglovePanelTitle": "开始任务"
+    },
+    "RawMessages!exammode": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/viz/exam_mode.data",
+      "fontSize": 22,
+      "foxglovePanelTitle": "出题模式"
+    },
+    "RawMessages!order": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/viz/grasp_order.data",
+      "fontSize": 18,
+      "foxglovePanelTitle": "抓取顺序（练习）"
+    },
+    "RawMessages!time": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/viz/elapsed.data",
+      "fontSize": 24,
+      "foxglovePanelTitle": "总用时（练习）"
+    },
+    "Publish!rulein": {
+      "topicName": "/mapping_rule_text",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "应用映射规则",
+      "buttonTooltip": "把裁判给的映射规则原文粘到这里再点按钮",
+      "buttonColor": "",
+      "advancedView": true,
+      "value": "{\n  \"data\": \"x 代表红色,y 代表蓝色;数值大于等于 3 的去 A 区,其他颜色去 C 区\"\n}",
+      "foxglovePanelTitle": "映射规则输入（可粘贴）"
+    },
+    "Publish!argin": {
+      "topicName": "/exam_arg",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "按此参数出题",
+      "buttonTooltip": "比赛模式填 11470507；练习模式清空后点按钮",
+      "buttonColor": "",
+      "advancedView": true,
+      "value": "{\n  \"data\": \"11470507\"\n}",
+      "foxglovePanelTitle": "出题参数输入（比赛模式）"
+    },
+    "Publish!qin": {
+      "topicName": "/panel_exam_question",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "应用题目",
+      "buttonTooltip": "可把出题程序输出的题目原文粘到这里",
+      "buttonColor": "",
+      "advancedView": true,
+      "value": "{\n  \"data\": \"\"\n}",
+      "foxglovePanelTitle": "题目输入（可粘贴）"
+    },
+    "Publish!seedin": {
+      "topicName": "/exam_seed",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "记录种子",
+      "buttonTooltip": "把「使用种子: N」里的 N 填在这里（仅显示用）",
+      "buttonColor": "",
+      "advancedView": true,
+      "value": "{\n  \"data\": \"\"\n}",
+      "foxglovePanelTitle": "题目种子输入"
+    }
+  },
+  "globalVariables": {
+    "globalVariable": {}
+  },
+  "userNodes": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "direction": "column",
+    "splitPercentage": 14,
+    "first": {
+      "direction": "row",
+      "splitPercentage": 18,
+      "first": "RawMessages!seed",
+      "second": {
+        "direction": "row",
+        "splitPercentage": 56.1,
+        "first": "RawMessages!calc",
+        "second": "RawMessages!rule"
+      }
+    },
+    "second": {
+      "direction": "column",
+      "splitPercentage": 76,
+      "first": {
+        "direction": "row",
+        "splitPercentage": 72,
+        "first": {
+          "direction": "column",
+          "splitPercentage": 20,
+          "first": {
+            "direction": "row",
+            "splitPercentage": 25,
+            "first": "Indicator!rnum",
+            "second": {
+              "direction": "row",
+              "splitPercentage": 33.33,
+              "first": "Indicator!rzone",
+              "second": {
+                "direction": "row",
+                "splitPercentage": 50,
+                "first": "Indicator!bnum",
+                "second": "Indicator!bzone"
+              }
+            }
+          },
+          "second": {
+            "direction": "column",
+            "splitPercentage": 40,
+            "first": {
+              "direction": "row",
+              "splitPercentage": 50,
+              "first": "Image!cam",
+              "second": "Image!vis"
+            },
+            "second": "3D!1juc55f"
+          }
+        },
+        "second": {
+          "direction": "column",
+          "splitPercentage": 25,
+          "first": "Indicator!prog",
+          "second": {
+            "direction": "column",
+            "splitPercentage": 33.33,
+            "first": "Indicator!taskphase",
+            "second": {
+              "direction": "column",
+              "splitPercentage": 50,
+              "first": "Indicator!eestate",
+              "second": "Publish!start"
+            }
+          }
+        }
+      },
+      "second": {
+        "direction": "row",
+        "splitPercentage": 12.59,
+        "first": "RawMessages!exammode",
+        "second": {
+          "direction": "row",
+          "splitPercentage": 17.6,
+          "first": "RawMessages!order",
+          "second": {
+            "direction": "row",
+            "splitPercentage": 15.53,
+            "first": "RawMessages!time",
+            "second": {
+              "direction": "row",
+              "splitPercentage": 28.74,
+              "first": "Publish!rulein",
+              "second": {
+                "direction": "row",
+                "splitPercentage": 32.26,
+                "first": "Publish!argin",
+                "second": {
+                  "direction": "row",
+                  "splitPercentage": 59.52,
+                  "first": "Publish!qin",
+                  "second": "Publish!seedin"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
