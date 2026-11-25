@@ -158,6 +158,10 @@ class TaskStateMachine(Node):
         self.declare_parameter("cube_width_m", 0.03)
         # Global shortest tour over pick→place legs (may reorder LLM groups)
         self.declare_parameter("use_route_planner", True)
+        # 用真实可行驶里程（静态地图 + 内切半径膨胀 + A*）替代直线欧氏距离来
+        # 选块/排顺序；直线距离会把"绕整栋楼的远块"当成近块（red#5 8.6m 直线
+        # vs 14.1m 实走）。取图失败会自动退回欧氏。
+        self.declare_parameter("use_road_cost", True)
         self.declare_parameter("plan_start_x", 0.0)
         self.declare_parameter("plan_start_y", 0.0)
 
@@ -2117,11 +2121,22 @@ class TaskStateMachine(Node):
                 sx = float(self.get_parameter("plan_start_x").value)
                 sy = float(self.get_parameter("plan_start_y").value)
             try:
+                _pt0 = time.time()
                 plan = plan_route(
                     text,
                     start=(sx, sy),
                     max_cubes=max_c,
                     use_door_via=False,
+                    use_road_cost=bool(
+                        self.get_parameter("use_road_cost").value
+                    ),
+                    grasp_standoff_m=float(
+                        self.get_parameter("grasp_standoff_m").value
+                    ),
+                )
+                self.get_logger().info(
+                    f"PLAN cost={plan.cost_mode} dt={time.time() - _pt0:.2f}s "
+                    f"start=({sx:.2f},{sy:.2f})"
                 )
             except Exception as exc:  # noqa: BLE001
                 self._pub_status(f"PLAN_FAIL: {exc} → fallback expand")

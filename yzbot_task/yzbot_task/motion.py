@@ -100,6 +100,13 @@ class MotionHelpers:
             node.get_parameter("use_gt_localization").value
         )
         self.cmd_vel_pub = node.create_publisher(Twist, "cmd_vel", 10)
+        # 【导航卡死取证】只读订阅 Nav2 侧与最终速度指令：导航"有路径但车不动"
+        # 时把"控制器到底有没有在发速度"打进日志。以前 25s 零位移查不出是
+        # 控制器没输出、被速度平滑/碰撞监视吃掉、还是物理卡住，只能盲退重试。
+        self._cmdv_nav: tuple = (None, 0.0)
+        self._cmdv_out: tuple = (None, 0.0)
+        node.create_subscription(Twist, "cmd_vel_nav", self._on_cmdv_nav, 10)
+        node.create_subscription(Twist, "cmd_vel", self._on_cmdv_out, 10)
         self._plan_pub = node.create_publisher(Path, "/plan", 10)
         self._local_plan_pub = node.create_publisher(Path, "/local_plan", 10)
         self.initialpose_pub = node.create_publisher(
@@ -495,6 +502,15 @@ class MotionHelpers:
         anchor_t = t0
         stalled = False
         poll_i = 0
+        # 【零位移快速判据】去年 11-23 16:54 那次：NAV_ACCEPTED 后 25.4s 车一米
+        # 没动，日志只有"一直有新路径"，最后走 25s 干等 + UNSTICK 盲退（用户看到
+        # 的"先不动，然后慢慢倒退"）。这里补两条：先 6s 判定"既不前进也不转"→
+        # 清图并重发同一目标（修一次性瞬态，如成本图里多了个假障碍格）；再来
+        # 6s 仍不动 → 立刻放弃走脱困，不让 25s 干等成为常态。
+        still_since = t0  # 既不位移也不转向的起始时刻
+        last_pos = None
+        last_yaw = 0.0
+        nomotion_retry = 0  # 0=未用阶梯 / 1=已清图重发过一次
         while not result_fut.done():
             if time.time() - t0 > timeout:
                 self.node.get_logger().error("nav result timeout")
@@ -525,6 +541,63 @@ class MotionHelpers:
                             if rate >= 0.15:
                                 best_t = now
                                 anchor, anchor_t = pos, now
+                    # 零位移阶梯（先清图重发，再放弃）——见循环前的说明
+                    turned = (
+                        last_pos is not None
+                        and abs(self._wrap_pi(pos[2] - last_yaw)) > 0.02
+                    )
+                    moved_eps = (
+                        last_pos is None
+                        or math.hypot(
+                            pos[0] - last_pos[0], pos[1] - last_pos[1]
+                        )
+                        > 0.03
+                    )
+                    if turned or moved_eps:
+                        still_since = now
+                    last_pos, last_yaw = pos, pos[2]
+                    still_for = now - still_since
+                    if still_for > 6.0 and dg > 0.6:
+                        if nomotion_retry == 0:
+                            nomotion_retry = 1
+                            self.node.get_logger().warn(
+                                f"NAV_NOMOTION {still_for:.1f}s 既不前进也不转 "
+                                f"@({pos[0]:.2f},{pos[1]:.2f}) dg={dg:.2f} "
+                                f"{self._cmdvel_snapshot()} → 清图并重发目标"
+                            )
+                            self.cancel_nav()
+                            time.sleep(0.35)
+                            self.clear_costmaps(timeout=0.8)
+                            self._publish_zone_keepout()
+                            resend = self.nav.send_goal_async(goal)
+                            if self._spin_until(resend, 5.0):
+                                gh2 = resend.result()
+                                if gh2 is not None and gh2.accepted:
+                                    goal_handle = gh2
+                                    self._nav_goal_handle = gh2
+                                    result_fut = gh2.get_result_async()
+                                    still_since = time.time()
+                                    last_pos = None
+                                    best_t = time.time()
+                                    self.node.get_logger().info(
+                                        "NAV_NOMOTION_RETRY 已清图+重发同一目标"
+                                    )
+                                    time.sleep(0.05)
+                                    continue
+                            self.node.get_logger().error(
+                                "NAV_NOMOTION 重发目标失败 → 交给脱困重试"
+                            )
+                            stalled = True
+                            self.cancel_nav()
+                            break
+                        self.node.get_logger().warn(
+                            f"NAV_NOMOTION {still_for:.1f}s 二次零位移 "
+                            f"@({pos[0]:.2f},{pos[1]:.2f}) dg={dg:.2f} "
+                            f"{self._cmdvel_snapshot()} → 放弃本段走脱困"
+                        )
+                        stalled = True
+                        self.cancel_nav()
+                        break
                     if (
                         time.time() - best_t > 25.0
                         and dg > 1.0
@@ -790,7 +863,11 @@ class MotionHelpers:
         # 位置到了就停。继续追朝向会在区前边走边拧，拧过再拧回来。
         soft_early = max(0.22, float(xy_tol))
         dock_handoff = 0.82
-        old_yaw_tol = self._set_follow_yaw_tol(0.90)
+        # 原来写 0.90（≈52°）是想"停靠别跟朝向较劲、后面再摆正"，但那个参数
+        # 在 Humble 里根本没声明、从来没生效（真正生效的一直是 yaml 的 0.30）。
+        # 现在改成能生效了，就只留一点点余量（0.35≈20°）：C 区垫子旁边空间窄，
+        # 卡死 0.30 会让车在垫前反复原地摆正；再松就摆得太歪、投放点会飘。
+        old_yaw_tol = self._set_follow_yaw_tol(0.35)
         try:
             self.navigate(
                 float(gx),
@@ -845,9 +922,18 @@ class MotionHelpers:
     def _set_follow_yaw_tol(
         self,
         value: float,
-        name: str = "FollowPath.yaw_goal_tolerance",
+        name: str = "general_goal_checker.yaw_goal_tolerance",
     ) -> Optional[float]:
-        """Set a controller yaw tolerance; return previous value if known."""
+        """Set a controller goal-checker yaw tolerance; return previous value.
+
+        【2026-11-23 修正】原来改的是 "FollowPath.yaw_goal_tolerance"，但
+        Humble 的 DWB 没有声明这个参数，运行期 Get/Set 全部失败：
+          Failed to get parameters: FollowPath.yaw_goal_tolerance
+          parameter 'FollowPath.yaw_goal_tolerance' cannot be set because
+          it was not declared
+        于是这个函数一直是死代码（PLACE 想要的 0.90 从来没生效过）。
+        真正生效的是 controller_server 上已声明的 goal_checker 插件参数。
+        """
         from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
         from rcl_interfaces.srv import SetParameters, GetParameters
 
@@ -990,12 +1076,17 @@ class MotionHelpers:
         # 【2026-11-22】恢复正常态时必须与 yaml 对齐：yaml 现在是
         # global inflation 0.80 / scaling 3.0、local inflation 0.55 / scaling 4.0
         # （原来这里硬写 0.38/4.0，每次 ease 结束都会把 yaml 的膨胀参数改回去）。
-        # ease 态 inflation 从 0.26 提到 0.36：0.26 < 内切 0.30 是非法配置，
-        # 日志每次切都在刷 "inflation radius (0.260) is smaller than the
-        # computed inscribed radius (0.300)"，膨胀层等于没有梯度。
+        # ease 态 inflation 用 0.45：必须严格大于两种 footprint 的内切半径
+        # （正常态 0.36、ease 态 0.30）。之前写 0.36 正好等于正常态内切半径，
+        # 而这一组参数是"先改 footprint、再改 inflation"分开下发的，中途被
+        # 抓拍到就等于 0.36 对 0.36，日志每次切都在刷
+        # "inflation radius (0.360) is smaller than the computed inscribed
+        # radius (0.360)"，膨胀层等于没梯度。0.45 既消掉这个竞态，又给门洞
+        # 留 0.15m 的代价梯度；而可通行宽度只由 footprint 内切半径决定，
+        # 改 inflation 不会让门洞变得过不去。
         if on:
-            infl_l, scale_l = 0.36, 6.0
-            infl_g, scale_g = 0.36, 6.0
+            infl_l, scale_l = 0.45, 6.0
+            infl_g, scale_g = 0.45, 6.0
             pad_l, pad_g = 0.0, 0.0
             footprint = (
                 "[[0.32, 0.33], [0.32, -0.33], [-0.30, -0.33], [-0.30, 0.33]]"
@@ -1033,7 +1124,8 @@ class MotionHelpers:
         # 徘徊；方块夹在车头 0.42m，0.32 仍留 0.10 余量。
         self.clear_costmaps(timeout=0.4)
         self.node.get_logger().info(
-            "C_MOUTH ease ON 膨胀0.26 footprint0.32x0.33"
+            f"C_MOUTH ease ON 膨胀{infl_l:.2f}/{infl_g:.2f} "
+            "footprint0.32x0.33"
             if on
             else "C_MOUTH ease OFF 膨胀/footprint 已恢复"
         )
@@ -1401,6 +1493,41 @@ class MotionHelpers:
         # After placing a cube, do NOT clear — keep laser marks so we don't plan over it
         if clear_maps:
             self.clear_costmaps(timeout=0.05)
+
+    def _on_cmdv_nav(self, msg) -> None:
+        import time
+
+        self._cmdv_nav = (
+            (float(msg.linear.x), float(msg.angular.z)),
+            time.time(),
+        )
+
+    def _on_cmdv_out(self, msg) -> None:
+        import time
+
+        self._cmdv_out = (
+            (float(msg.linear.x), float(msg.angular.z)),
+            time.time(),
+        )
+
+    def _cmdvel_snapshot(self) -> str:
+        """格式化最近收到的速度指令，用于卡死日志自证。"""
+        import time
+
+        now = time.time()
+
+        def _fmt(item: tuple) -> str:
+            tw, stamp = item
+            if tw is None:
+                return "none"
+            return (
+                f"vx={tw[0]:+.2f},wz={tw[1]:+.2f},age={now - stamp:.1f}s"
+            )
+
+        return (
+            f"cmd_vel_nav[{_fmt(self._cmdv_nav)}] "
+            f"cmd_vel[{_fmt(self._cmdv_out)}]"
+        )
 
     def stop_chassis(self, n: int = 2) -> None:
         tw = Twist()
