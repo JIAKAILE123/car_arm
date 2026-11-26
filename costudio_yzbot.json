@@ -756,12 +756,22 @@
     "Publish!argin": {
       "topicName": "/exam_arg",
       "datatype": "std_msgs/msg/String",
-      "buttonText": "开始任务",
-      "buttonTooltip": "上方文本框填出题参数（比赛模式 11470507，练习留空），点「开始任务」即按此参数运行出题程序并自动执行",
+      "buttonText": "出题程序",
+      "buttonTooltip": "上方文本框填出题参数（比赛模式 11470507，练习留空），点「出题程序」运行出题并显示题目/数量/区域/抓取顺序（此时不开抓）",
       "buttonColor": "",
       "advancedView": true,
       "value": "{\n  \"data\": \"11470507\"\n}",
-      "foxglovePanelTitle": "开始任务（先填出题参数）"
+      "foxglovePanelTitle": "① 出题程序（填参数→出题）"
+    },
+    "Publish!start": {
+      "topicName": "/task_start",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "开始任务",
+      "buttonTooltip": "确认题目无误后点「开始任务」，机器人开始抓取并计时",
+      "buttonColor": "",
+      "advancedView": false,
+      "value": "{\n  \"data\": \"go\"\n}",
+      "foxglovePanelTitle": "② 开始任务"
     },
     "RawMessages!exammode": {
       "diffEnabled": false,
@@ -838,17 +848,22 @@
         },
         "second": {
           "direction": "column",
-          "splitPercentage": 21.28,
+          "splitPercentage": 17.86,
           "first": "Indicator!prog",
           "second": {
             "direction": "column",
-            "splitPercentage": 27.03,
+            "splitPercentage": 21.74,
             "first": "Indicator!taskphase",
             "second": {
               "direction": "column",
-              "splitPercentage": 37.04,
+              "splitPercentage": 27.78,
               "first": "Indicator!eestate",
-              "second": "Publish!argin"
+              "second": {
+                "direction": "column",
+                "splitPercentage": 61.54,
+                "first": "Publish!argin",
+                "second": "Publish!start"
+              }
             }
           }
         }

@@ -200,6 +200,8 @@ class VizBridge(Node):
         self.create_subscription(String, "/exam_seed", self._on_seed, 10)
         self.create_subscription(String, "/llm_xy", self._on_xy, 10)
         self.create_subscription(String, "/task_command", self._on_command, 10)
+        # 出题预览：仅显示抓取顺序/数量，不启动计时、不触发执行（等「开始任务」）。
+        self.create_subscription(String, "/task_command_preview", self._on_command_preview, 10)
         self.create_subscription(String, "/task_plan", self._on_plan, 10)
         self.create_subscription(String, "/task_status", self._on_status, 10)
         self.create_subscription(String, "/task_info", self._on_info, 10)
@@ -441,7 +443,7 @@ class VizBridge(Node):
         self._phase = "solve"
         self._work = "大模型解题中"
         self._progress_text = "正在解析题目"
-        self._start_timer("收到题目")
+        # 出题阶段不启动计时；计时在「开始任务」收到 /task_command 时才启动。
         self._flush()
 
     def _on_rule_text(self, msg: String):
@@ -467,6 +469,22 @@ class VizBridge(Node):
         self._xy = raw.replace(" ", "")
         self._work = "解题完成，生成抓取任务"
         self._progress_text = "解题完成"
+        self._flush()
+
+    def _on_command_preview(self, msg: String):
+        """出题预览：显示抓取顺序/数量/区域，但不启动计时、不触发执行。"""
+        self._command = (msg.data or "").strip()
+        self._phase = "ready"
+        self._work = "出题完成，待开始任务"
+        total = 0
+        for m in re.finditer(r"(?:red|blue)\s*,\s*(\d+)\s*,", self._command, re.I):
+            total += int(m.group(1))
+        for _ in re.finditer(r"(?:red|blue)\s*#\s*\d+", self._command, re.I):
+            total += 1
+        if total:
+            self._total = total
+            self._done = 0
+            self._progress_text = f"计划抓取 {self._total} 件货物"
         self._flush()
 
     def _on_command(self, msg: String):
@@ -646,7 +664,11 @@ class VizBridge(Node):
         ):
             self._phase = "nav"
             self._work = "导航前往取货点"
-        elif any(k in text for k in ("LLM_SOLVED", "SOLVED", "PARSED", "PLAN_OK")):
+        elif "LLM_SOLVED" in text:
+            # 出题阶段解题完成（尚未点开始任务）——与预览态文案一致，勿被覆盖成「已解析」
+            self._phase = "ready"
+            self._work = "出题完成，待开始任务"
+        elif any(k in text for k in ("SOLVED", "PARSED", "PLAN_OK")):
             self._phase = "ready"
             self._work = "任务指令已解析"
         elif "WAITING_SERVERS" in text:

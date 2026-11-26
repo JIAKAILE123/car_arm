@@ -46,6 +46,8 @@ class LlmSolverNode(Node):
         self.pub_info = self.create_publisher(String, "/task_info", 10)
         self.pub_xy = self.create_publisher(String, "/llm_xy", 10)
         self.pub_q = self.create_publisher(String, "/exam_question_echo", 10)
+        # 出题预览：解题后先把指令发到这里供面板显示抓取顺序，不触发 task_sm。
+        self.pub_preview = self.create_publisher(String, "/task_command_preview", 10)
         latched = QoSProfile(
             depth=1,
             reliability=ReliabilityPolicy.RELIABLE,
@@ -56,6 +58,7 @@ class LlmSolverNode(Node):
         self._panel_rule_text = ""      # 面板粘贴的映射规则原文（优先于参数）
         self._last_published_rule = ""  # 防自回环：忽略自己发的 latched 规则
         self._last_question = ""        # 规则变更后自动重算
+        self._pending_command = ""      # 出题解出的指令，待「开始任务」才下发执行
 
         self.create_subscription(String, "/exam_question", self._on_question, 10)
         # coStudio「粘贴题目解题」面板也可发到此话题（与 /exam_question 同处理）
@@ -95,12 +98,16 @@ class LlmSolverNode(Node):
             self._on_question(String(data=self._last_question))
 
     def _on_task_start(self, msg: String) -> None:
-        """面板「开始任务」按钮：用上一题重新解题并下发任务指令。"""
-        if not self._last_question:
-            self.get_logger().warn("开始任务：尚无题目，请先在面板输入题目")
+        """面板「开始任务」按钮：把出题阶段解好的指令下发 /task_command，触发执行。"""
+        if not self._pending_command:
+            self.get_logger().warn("开始任务：尚未出题，请先点「出题程序」生成题目")
             return
-        self.get_logger().info("面板「开始任务」→ 重解上一题并下发 /task_command")
-        self._on_question(String(data=self._last_question))
+        out = String()
+        out.data = self._pending_command
+        self.pub_cmd.publish(out)
+        self.get_logger().info(
+            f"面板「开始任务」→ 下发 /task_command: {self._pending_command}"
+        )
 
     def _rule_id(self) -> int:
         return resolve_rule_id(
@@ -160,7 +167,10 @@ class LlmSolverNode(Node):
 
         out = String()
         out.data = cmd
-        self.pub_cmd.publish(out)
+        # 出题阶段：只暂存指令并发预览（面板显示抓取顺序/数量），不触发 task_sm。
+        # 真正执行要等面板「开始任务」按钮 → /task_start → 下发 /task_command。
+        self._pending_command = cmd
+        self.pub_preview.publish(out)
 
         xy = String()
         xy.data = f"x={x},y={y}"
