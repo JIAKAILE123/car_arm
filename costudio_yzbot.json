@@ -753,25 +753,15 @@
       ],
       "foxglovePanelTitle": "状态"
     },
-    "Publish!start": {
-      "topicName": "/task_start",
-      "datatype": "std_msgs/msg/String",
-      "buttonText": "开始任务",
-      "buttonTooltip": "用上一题重新解题并下发任务指令",
-      "buttonColor": "",
-      "advancedView": true,
-      "value": "{\n  \"data\": \"go\"\n}",
-      "foxglovePanelTitle": "开始任务"
-    },
     "Publish!argin": {
       "topicName": "/exam_arg",
       "datatype": "std_msgs/msg/String",
-      "buttonText": "比赛出题",
-      "buttonTooltip": "自动追加参数 11470507 运行官方出题程序，种子+题目自动显示并解题",
+      "buttonText": "开始任务",
+      "buttonTooltip": "上方文本框填出题参数（比赛模式 11470507，练习留空），点「开始任务」即按此参数运行出题程序并自动执行",
       "buttonColor": "",
-      "advancedView": false,
+      "advancedView": true,
       "value": "{\n  \"data\": \"11470507\"\n}",
-      "foxglovePanelTitle": "比赛出题（一键运行出题程序）"
+      "foxglovePanelTitle": "开始任务（先填出题参数）"
     },
     "RawMessages!exammode": {
       "diffEnabled": false,
@@ -848,31 +838,26 @@
         },
         "second": {
           "direction": "column",
-          "splitPercentage": 25,
+          "splitPercentage": 21.28,
           "first": "Indicator!prog",
           "second": {
             "direction": "column",
-            "splitPercentage": 33.33,
+            "splitPercentage": 27.03,
             "first": "Indicator!taskphase",
             "second": {
               "direction": "column",
-              "splitPercentage": 50,
+              "splitPercentage": 37.04,
               "first": "Indicator!eestate",
-              "second": "Publish!start"
+              "second": "Publish!argin"
             }
           }
         }
       },
       "second": {
         "direction": "row",
-        "splitPercentage": 29.41,
-        "first": "Publish!argin",
-        "second": {
-          "direction": "row",
-          "splitPercentage": 33.33,
-          "first": "RawMessages!exammode",
-          "second": "Publish!rulein"
-        }
+        "splitPercentage": 33.33,
+        "first": "RawMessages!exammode",
+        "second": "Publish!rulein"
       }
     }
   }
