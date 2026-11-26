@@ -763,6 +763,16 @@
       "value": "{\n  \"data\": \"go\"\n}",
       "foxglovePanelTitle": "开始任务"
     },
+    "Publish!argin": {
+      "topicName": "/exam_arg",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "比赛出题",
+      "buttonTooltip": "自动追加参数 11470507 运行官方出题程序，种子+题目自动显示并解题",
+      "buttonColor": "",
+      "advancedView": false,
+      "value": "{\n  \"data\": \"11470507\"\n}",
+      "foxglovePanelTitle": "比赛出题（一键运行出题程序）"
+    },
     "RawMessages!exammode": {
       "diffEnabled": false,
       "diffMethod": "custom",
@@ -781,36 +791,6 @@
       "advancedView": true,
       "value": "{\n  \"data\": \"x 代表红色,y 代表蓝色;数值大于等于 3 的去 A 区,其他颜色去 C 区\"\n}",
       "foxglovePanelTitle": "映射规则输入（可粘贴）"
-    },
-    "Publish!argin": {
-      "topicName": "/exam_arg",
-      "datatype": "std_msgs/msg/String",
-      "buttonText": "按此参数出题",
-      "buttonTooltip": "比赛模式填 11470507；练习模式清空后点按钮",
-      "buttonColor": "",
-      "advancedView": true,
-      "value": "{\n  \"data\": \"11470507\"\n}",
-      "foxglovePanelTitle": "出题参数输入（比赛模式）"
-    },
-    "Publish!qin": {
-      "topicName": "/panel_exam_question",
-      "datatype": "std_msgs/msg/String",
-      "buttonText": "应用题目",
-      "buttonTooltip": "可把出题程序输出的题目原文粘到这里",
-      "buttonColor": "",
-      "advancedView": true,
-      "value": "{\n  \"data\": \"\"\n}",
-      "foxglovePanelTitle": "题目输入（可粘贴）"
-    },
-    "Publish!seedin": {
-      "topicName": "/exam_seed",
-      "datatype": "std_msgs/msg/String",
-      "buttonText": "记录种子",
-      "buttonTooltip": "把「使用种子: N」里的 N 填在这里（仅显示用）",
-      "buttonColor": "",
-      "advancedView": true,
-      "value": "{\n  \"data\": \"\"\n}",
-      "foxglovePanelTitle": "题目种子输入"
     }
   },
   "globalVariables": {
@@ -885,23 +865,13 @@
       },
       "second": {
         "direction": "row",
-        "splitPercentage": 17.14,
-        "first": "RawMessages!exammode",
+        "splitPercentage": 29.41,
+        "first": "Publish!argin",
         "second": {
           "direction": "row",
-          "splitPercentage": 28.74,
-          "first": "Publish!rulein",
-          "second": {
-            "direction": "row",
-            "splitPercentage": 32.26,
-            "first": "Publish!argin",
-            "second": {
-              "direction": "row",
-              "splitPercentage": 59.52,
-              "first": "Publish!qin",
-              "second": "Publish!seedin"
-            }
-          }
+          "splitPercentage": 33.33,
+          "first": "RawMessages!exammode",
+          "second": "Publish!rulein"
         }
       }
     }
