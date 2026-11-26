@@ -97,7 +97,12 @@ echo "[2/4] 等待 Nav2 + GT 定位 …"; sleep 12
 # ③ 可视化转发 cobridge + viz_bridge + llm_solver + exam_feeder（面板模式）
 #    解题/出题节点已并入 rosbridge_viz.launch.py，随可视化一起常驻，
 #    避免只起 viz_bridge 时点「开始任务」无反应、题目停在「等待接收比赛题目」。
-open_tab "3-Viz+LLM" "ros2 launch yzbot_task rosbridge_viz.launch.py show_elapsed:=${SHOW_ELAPSED} rule_id:=${RULE_ID} rule_text:=\"${RULE_TEXT}\" run_exam:=${RUN_EXAM} exam_arg:=\"${EXAM_ARG}\""
+#    注意：ros2 launch 拒绝空值参数（`rule_text:=` 会报 malformed 并秒退），
+#    RULE_TEXT/EXAM_ARG 为空时必须整个省略，只传非空的。
+VIZ_ARGS="show_elapsed:=${SHOW_ELAPSED} rule_id:=${RULE_ID} run_exam:=${RUN_EXAM}"
+[[ -n "${RULE_TEXT}" ]] && VIZ_ARGS="${VIZ_ARGS} rule_text:=\"${RULE_TEXT}\""
+[[ -n "${EXAM_ARG}" ]] && VIZ_ARGS="${VIZ_ARGS} exam_arg:=\"${EXAM_ARG}\""
+open_tab "3-Viz+LLM" "ros2 launch yzbot_task rosbridge_viz.launch.py ${VIZ_ARGS}"
 echo "[3/4] 等待可视化与大模型解题 …"; sleep 5
 
 # ④ 任务状态机
