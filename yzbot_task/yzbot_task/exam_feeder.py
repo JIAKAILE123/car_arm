@@ -163,8 +163,13 @@ def main(args=None):
     try:
         exam_arg = str(node.get_parameter("exam_arg").value or "").strip()
         panel_mode = bool(node.get_parameter("panel_mode").value)
-        if panel_mode and not exam_arg:
+        if panel_mode:
             _panel_banner(node)
+            if exam_arg:
+                # 预置参数（EXAM_ARG=…）：先出一次题，随后继续常驻等面板按钮
+                node.feed_once(exam_arg)
+                for _ in range(8):
+                    rclpy.spin_once(node, timeout_sec=0.1)
             node.get_logger().info("等待面板输入 /exam_arg（比赛 11470507 / 练习留空）…")
             rclpy.spin(node)  # 面板每发一次 /exam_arg 就重新出题
             return

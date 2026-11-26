@@ -49,6 +49,11 @@ def _launch_setup(context, *args, **kwargs):
     use_sim_time = LaunchConfiguration("use_sim_time")
     port = LaunchConfiguration("port")
     show_elapsed = LaunchConfiguration("show_elapsed")
+    rule_id = LaunchConfiguration("rule_id")
+    rule_text = LaunchConfiguration("rule_text")
+    backend = LaunchConfiguration("backend")
+    run_exam = LaunchConfiguration("run_exam")
+    exam_arg = LaunchConfiguration("exam_arg")
 
     actions = []
 
@@ -123,6 +128,45 @@ def _launch_setup(context, *args, **kwargs):
             ],
         )
     )
+
+    # 大模型解题节点：与 viz_bridge 同生命周期，保证「出题→解题→预览」链路常驻。
+    # 之前 llm_solver 由 run.sh 标签单独拉起，若只跑本 launch 就会缺解题节点，
+    # 表现为面板点「开始任务」无反应、题目停在「等待接收比赛题目」。
+    actions.append(
+        Node(
+            package="yzbot_task",
+            executable="llm_solver",
+            name="llm_solver",
+            output="screen",
+            parameters=[
+                {
+                    "use_sim_time": use_sim_time,
+                    "backend": backend,
+                    "rule_id": ParameterValue(rule_id, value_type=int),
+                    "rule_text": rule_text,
+                }
+            ],
+        )
+    )
+
+    # 出题节点（面板模式常驻）：订阅 /exam_arg，面板「出题程序」按钮每点一次就运行
+    # 官方出题 bin 并发布 /exam_question + /exam_seed。run_exam:=false 可关闭。
+    if run_exam.perform(context).strip().lower() in ("true", "1", "yes"):
+        actions.append(
+            Node(
+                package="yzbot_task",
+                executable="exam_feeder",
+                name="exam_feeder",
+                output="screen",
+                parameters=[
+                    {
+                        "use_sim_time": use_sim_time,
+                        "panel_mode": True,
+                        "exam_arg": exam_arg,
+                    }
+                ],
+            )
+        )
     return actions
 
 
@@ -143,6 +187,31 @@ def generate_launch_description():
                 "show_elapsed",
                 default_value="true",
                 description="测试总用时面板；正式比赛改 false",
+            ),
+            DeclareLaunchArgument(
+                "rule_id",
+                default_value="0",
+                description="映射规则 1/2/3；0=按粘贴的规则原文自动识别",
+            ),
+            DeclareLaunchArgument(
+                "rule_text",
+                default_value="",
+                description="映射规则原文（面板粘贴优先）",
+            ),
+            DeclareLaunchArgument(
+                "backend",
+                default_value="cross",
+                description="解题后端 deepseek|local|auto|cross",
+            ),
+            DeclareLaunchArgument(
+                "run_exam",
+                default_value="true",
+                description="是否随可视化拉起出题节点 exam_feeder（面板模式）",
+            ),
+            DeclareLaunchArgument(
+                "exam_arg",
+                default_value="",
+                description="出题参数预置（11470507=比赛）；留空则等面板按钮",
             ),
             OpaqueFunction(function=_launch_setup),
         ]

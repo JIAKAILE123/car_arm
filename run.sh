@@ -31,7 +31,8 @@ fi
 #   RULE_ID=2  数值≥3为红、否则蓝；x→B区、y→A区
 #   RULE_ID=3  数值大者蓝、小者红；蓝→B区、红→C区
 # 也可 RULE_TEXT="<规则原文>" 复制粘贴，自动识别编号（RULE_ID 显式指定时优先）
-RULE_ID="${RULE_ID:-1}"
+# 默认 0=自动识别：面板「映射规则输入」粘贴哪条就用哪条（未粘贴时默认规则①）
+RULE_ID="${RULE_ID:-0}"
 RULE_TEXT="${RULE_TEXT:-}"
 
 RUN_EXAM="${RUN_EXAM:-true}"
@@ -93,8 +94,10 @@ echo "[1/4] 等待 Gazebo 加载世界并生成小车 …"; sleep 25
 open_tab "2-Nav2" "ros2 launch bot_navigation nav_bringup_gazebo2.launch.py"
 echo "[2/4] 等待 Nav2 + GT 定位 …"; sleep 12
 
-# ③ 可视化转发 cobridge + viz_bridge，同一个标签里再起 llm_solver
-open_tab "3-Viz+LLM" "ros2 launch yzbot_task rosbridge_viz.launch.py show_elapsed:=${SHOW_ELAPSED} & sleep 3; ros2 run yzbot_task llm_solver --ros-args -p rule_id:=${RULE_ID} -p rule_text:=\"${RULE_TEXT}\""
+# ③ 可视化转发 cobridge + viz_bridge + llm_solver + exam_feeder（面板模式）
+#    解题/出题节点已并入 rosbridge_viz.launch.py，随可视化一起常驻，
+#    避免只起 viz_bridge 时点「开始任务」无反应、题目停在「等待接收比赛题目」。
+open_tab "3-Viz+LLM" "ros2 launch yzbot_task rosbridge_viz.launch.py show_elapsed:=${SHOW_ELAPSED} rule_id:=${RULE_ID} rule_text:=\"${RULE_TEXT}\" run_exam:=${RUN_EXAM} exam_arg:=\"${EXAM_ARG}\""
 echo "[3/4] 等待可视化与大模型解题 …"; sleep 5
 
 # ④ 任务状态机
@@ -135,25 +138,21 @@ if [[ "${RUN_EXAM}" == "true" ]]; then
       ros2 run yzbot_task practice_exam --ros-args -p mode:=robot || true
       ;;
     *)
-      ARG="${EXAM_ARG}"
-      if [[ -n "${ARG}" ]]; then
-        # 预置参数（EXAM_ARG=11470507 ./run.sh）：直接出题，不等面板
-        ros2 run yzbot_task exam_feeder --ros-args -p exam_arg:="${ARG}" || true
-      else
-        # 面板模式：出题参数在可视化面板里输入/粘贴后点按钮（比赛 11470507；
-        # 留空=练习模式；可反复发送重新出题），节点后台常驻
-        echo
-        echo "→ 面板模式出题（exam_feeder 后台常驻）："
-        echo "    在 coStudio 面板「出题参数输入」里填参数后点按钮："
-        echo "      比赛模式 → 11470507（题目每 30 分钟变更一次）"
-        echo "      练习模式 → 留空（清空后再点一次）"
-        echo "    日志：~/.roslog/exam_feeder.log"
-        nohup ros2 run yzbot_task exam_feeder --ros-args -p panel_mode:=true \
-          >"${HOME}/dev_ws/.roslog/exam_feeder.log" 2>&1 &
+      # 官方出题 bin：exam_feeder（面板模式）已随 3-Viz 的 rosbridge_viz.launch.py
+      # 一起常驻（run_exam:=${RUN_EXAM}，预置参数 exam_arg:=${EXAM_ARG}）。
+      # 这里不再单独拉起，避免重复节点；面板「① 出题程序」按钮即触发重新出题。
+      echo
+      echo "→ 出题节点 exam_feeder 已随可视化启动（面板模式常驻）。"
+      echo "    在 coStudio 右列「① 出题程序」填参数后点按钮出题："
+      echo "      比赛模式 → 11470507（题目每 30 分钟变更一次）"
+      echo "      练习模式 → 留空（清空后再点一次）"
+      echo "    出题只显示题目/数量/区域/抓取顺序，不开抓；点「② 开始任务」才执行并计时。"
+      if [[ -n "${EXAM_ARG}" ]]; then
+        echo "    （已预置出题参数 EXAM_ARG=${EXAM_ARG}，启动时自动出一次题）"
       fi
       ;;
   esac
-  echo "→ 出题完成，任务已在 4-TaskSM 开始执行。"
+  echo "→ 出题链路就绪：面板「① 出题程序」出题 →「② 开始任务」才开抓并计时。"
 else
   echo "[提示] RUN_EXAM=false：未自动出题。可手动执行："
   echo "   ros2 run yzbot_task exam_feeder --ros-args -p panel_mode:=true   # 面板输入"
